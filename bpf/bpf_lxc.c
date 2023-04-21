@@ -402,7 +402,7 @@ static __always_inline int handle_ipv6_from_lxc(struct __ctx_buff *ctx, __u32 *d
 			encrypt_key = get_min_encrypt_key(info->key);
 			node_id = info->node_id;
 		} else {
-			*dst_sec_identity = WORLD_ID;
+			*dst_sec_identity = WORLD_IPV6_ID;
 		}
 		cilium_dbg(ctx, info ? DBG_IP_ID_MAP_SUCCEED6 : DBG_IP_ID_MAP_FAILED6,
 			   daddr->p4, *dst_sec_identity);
@@ -843,7 +843,7 @@ static __always_inline int handle_ipv4_from_lxc(struct __ctx_buff *ctx, __u32 *d
 			encrypt_key = get_min_encrypt_key(info->key);
 			node_id = info->node_id;
 		} else {
-			*dst_sec_identity = WORLD_ID;
+			*dst_sec_identity = WORLD_IPV4_ID;
 		}
 
 		cilium_dbg(ctx, info ? DBG_IP_ID_MAP_SUCCEED4 : DBG_IP_ID_MAP_FAILED4,
@@ -1129,8 +1129,8 @@ skip_egress_gateway:
 			if (eth_store_daddr(ctx, (__u8 *)&vtep->vtep_mac, 0) < 0)
 				return DROP_WRITE_ERROR;
 			return __encap_and_redirect_with_nodeid(ctx, 0, vtep->tunnel_endpoint,
-								SECLABEL, WORLD_ID,
-								WORLD_ID, &trace);
+								SECLABEL, WORLD_IPV4_ID,
+								WORLD_IPV4_ID, &trace);
 		}
 	}
 skip_vtep:
@@ -2208,7 +2208,7 @@ int cil_to_container(struct __ctx_buff *ctx)
 #ifdef ENABLE_IPV6
 	case bpf_htons(ETH_P_IPV6):
 # ifdef ENABLE_HIGH_SCALE_IPCACHE
-	if (identity == WORLD_ID) {
+	if (identity == WORLD_IPV6_ID) {
 		struct endpoint_info *ep;
 		void *data, *data_end;
 		struct ipv6hdr *ip6;
@@ -2229,7 +2229,7 @@ int cil_to_container(struct __ctx_buff *ctx)
 #ifdef ENABLE_IPV4
 	case bpf_htons(ETH_P_IP):
 # ifdef ENABLE_HIGH_SCALE_IPCACHE
-	if (identity == WORLD_ID) {
+	if (identity == WORLD_IPV4_ID) {
 		struct endpoint_info *ep;
 		void *data, *data_end;
 		struct iphdr *ip4;
