@@ -3,7 +3,7 @@
 # Copyright 2020-2021 Authors of Cilium
 # SPDX-License-Identifier: Apache-2.0
 
-ARG CILIUM_BUILDER_IMAGE=quay.io/cilium/cilium-builder:6087f5cac3f2d80d34a598fc9b67a16b7d496d32@sha256:84f81a28d35135bf3a34bfcbdc67ab946e70cf3011491b90e335c0c6a4ad5732
+ARG CILIUM_BUILDER_IMAGE=quay.io/cilium/cilium-builder:c5d468f67d120a6c8dabec19d2fca0bdf021818a@sha256:e9f4c55c4b182388fe2a773f07f68ca0d70c3be37c689eb839c8e7964ea75f54
 ARG CILIUM_RUNTIME_IMAGE=quay.io/cilium/cilium-runtime:b697d634b751d24a764839b5ba518609940138c4@sha256:87bb40673a1a1087301686bf34e47b04ca229c6f2b3c00c7b702365a72015a89
 
 
