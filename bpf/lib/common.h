@@ -698,11 +698,13 @@ enum {
 	CB_POLICY,
 #define	CB_ADDR_V6_2		CB_POLICY	/* Alias, non-overlapping */
 #define	CB_BACKEND_ID		CB_POLICY	/* Alias, non-overlapping */
+#define CB_SRC_PORT			CB_POLICY	/* Alias, non-overlapping */
 #define CB_SRV6_SID_3		CB_POLICY	/* Alias, non-overlapping */
 #define CB_ENCAP_DSTID		CB_POLICY	/* XDP */
 	CB_NAT,
 #define	CB_ADDR_V6_3		CB_NAT		/* Alias, non-overlapping */
 #define	CB_FROM_HOST		CB_NAT		/* Alias, non-overlapping */
+#define CB_ADDR_V4_2		CB_NAT		/* Alias, non-overlapping */
 #define CB_SRV6_SID_4		CB_NAT		/* Alias, non-overlapping */
 	CB_CT_STATE,
 #define	CB_ADDR_V6_4		CB_CT_STATE	/* Alias, non-overlapping */
