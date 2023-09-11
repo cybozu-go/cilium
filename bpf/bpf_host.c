@@ -552,7 +552,8 @@ handle_ipv4(struct __ctx_buff *ctx, __u32 secctx,
 		if (vtep->vtep_mac && vtep->tunnel_endpoint) {
 			if (eth_store_daddr(ctx, (__u8 *)&vtep->vtep_mac, 0) < 0)
 				return DROP_WRITE_ERROR;
-			return __encap_and_redirect_with_nodeid(ctx, vtep->tunnel_endpoint,
+			return __encap_and_redirect_with_nodeid(ctx,
+								vtep->tunnel_endpoint,
 								secctx, WORLD_ID, WORLD_ID, &trace);
 		}
 	}
@@ -562,7 +563,8 @@ skip_vtep:
 #ifdef TUNNEL_MODE
 	info = ipcache_lookup4(&IPCACHE_MAP, ip4->daddr, V4_CACHE_KEY_LEN);
 	if (info != NULL && info->tunnel_endpoint != 0) {
-		return encap_and_redirect_with_nodeid(ctx, info->tunnel_endpoint,
+		return encap_and_redirect_with_nodeid(ctx,
+							  info->tunnel_endpoint,
 						      secctx, info->sec_label,
 						      &trace);
 	} else {
@@ -1052,9 +1054,9 @@ int cil_from_netdev(struct __ctx_buff *ctx)
 		edt_set_aggregate(ctx, 0);
 
 		ret = __encap_and_redirect_with_nodeid(ctx, ctx_get_xfer(ctx, XFER_ENCAP_NODEID),
-							ctx_get_xfer(ctx, XFER_ENCAP_SECLABEL),
-							ctx_get_xfer(ctx, XFER_ENCAP_DSTID),
-							NOT_VTEP_DST, &trace);
+						       ctx_get_xfer(ctx, XFER_ENCAP_SECLABEL),
+						       ctx_get_xfer(ctx, XFER_ENCAP_DSTID),
+						       NOT_VTEP_DST, &trace);
 
 		if (IS_ERR(ret))
 			goto drop_err;

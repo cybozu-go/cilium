@@ -13,6 +13,7 @@
 #  define DSR_ENCAP_MODE 0
 #  define DSR_ENCAP_IPIP 2
 #  define DSR_ENCAP_IPIP_CNI 3
+#  define DSR_ENCAP_GENEVE 4
 # endif
 # if defined(ENABLE_IPV4) && defined(ENABLE_MASQUERADE) && !defined(IPV4_MASQUERADE)
 #  define IPV4_MASQUERADE 0
