@@ -107,9 +107,9 @@ func init() {
 	registerOps := k8s_metrics.RegisterOpts{
 		ClientCertExpiry:      nil,
 		ClientCertRotationAge: nil,
-		RequestLatency:        &k8sMetrics{},
-		RateLimiterLatency:    nil,
-		RequestResult:         &k8sMetrics{},
+		RequestLatency:        &requestLatencyAdapter{},
+		RateLimiterLatency:    &rateLimiterLatencyAdapter{},
+		RequestResult:         &resultAdapter{},
 	}
 	k8s_metrics.Register(registerOps)
 	k8s_metrics.RequestLatency = registerOps.RequestLatency
@@ -334,15 +334,23 @@ func NewK8sWatcher(
 	}
 }
 
-// k8sMetrics implements the LatencyMetric and ResultMetric interface from
-// k8s client-go package
-type k8sMetrics struct{}
+// requestLatencyAdapter implements the LatencyMetric interface from k8s client-go package
+type requestLatencyAdapter struct{}
 
-func (*k8sMetrics) Observe(_ context.Context, verb string, u url.URL, latency time.Duration) {
+func (*requestLatencyAdapter) Observe(_ context.Context, verb string, u url.URL, latency time.Duration) {
 	metrics.KubernetesAPIInteractions.WithLabelValues(u.Path, verb).Observe(latency.Seconds())
 }
 
-func (*k8sMetrics) Increment(_ context.Context, code string, method string, host string) {
+// rateLimiterLatencyAdapter implements the LatencyMetric interface from k8s client-go package
+type rateLimiterLatencyAdapter struct{}
+
+func (c *rateLimiterLatencyAdapter) Observe(_ context.Context, verb string, u url.URL, latency time.Duration) {
+	metrics.KubernetesAPIRateLimiterLatency.WithLabelValues(u.Path, verb).Observe(latency.Seconds())
+}
+
+type resultAdapter struct{}
+
+func (*resultAdapter) Increment(_ context.Context, code string, method string, host string) {
 	metrics.KubernetesAPICallsTotal.WithLabelValues(host, method, code).Inc()
 	// The 'code' is set to '<error>' in case an error is returned from k8s
 	// more info:

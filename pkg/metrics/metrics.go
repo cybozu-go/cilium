@@ -412,6 +412,9 @@ var (
 	// to the kube-apiserver
 	KubernetesAPIInteractions = NoOpObserverVec
 
+	// KubernetesAPIRateLimiterLatency is the client side rate limiter latency metric
+	KubernetesAPIRateLimiterLatency = NoOpObserverVec
+
 	// KubernetesAPICallsTotal is the counter for all API calls made to
 	// kube-apiserver.
 	KubernetesAPICallsTotal = NoOpCounterVec
@@ -1104,6 +1107,15 @@ func CreateConfiguration(metricsEnabled []string) (Configuration, []prometheus.C
 
 			collectors = append(collectors, KubernetesAPIInteractions)
 			c.KubernetesAPIInteractionsEnabled = true
+
+		case Namespace + "_" + SubsystemK8sClient + "_rate_limiter_duration_seconds":
+			KubernetesAPIRateLimiterLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+				Namespace: Namespace,
+				Subsystem: SubsystemK8sClient,
+				Name:      "rate_limiter_duration_seconds",
+				Help:      "Kubernetes client rate limiter latency in seconds. Broken down by path and method.",
+				Buckets:   []float64{0.005, 0.025, 0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 60.0},
+			}, []string{LabelPath, LabelMethod})
 
 		case Namespace + "_" + SubsystemK8sClient + "_api_calls_total":
 			KubernetesAPICallsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
