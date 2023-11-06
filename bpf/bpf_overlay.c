@@ -238,6 +238,11 @@ static __always_inline int handle_ipv4(struct __ctx_buff *ctx, __u32 *identity)
 			return DROP_NO_TUNNEL_KEY;
 		*identity = key.tunnel_id;
 
+#if defined(ENABLE_DSR) && DSR_ENCAP_MODE == DSR_ENCAP_GENEVE
+		if (info)
+			*identity = info->sec_label;
+#endif
+
 		if (*identity == HOST_ID)
 			return DROP_INVALID_IDENTITY;
 #ifdef ENABLE_VTEP
