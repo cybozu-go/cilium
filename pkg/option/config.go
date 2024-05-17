@@ -1260,6 +1260,9 @@ const (
 	// DSR dispatch mode to encapsulate to IPIP
 	DSRDispatchIPIP = "ipip"
 
+	// DSR dispatch mod to encapsulate to GENEVE
+	DSRDispatchGeneve = "geneve"
+
 	// DSR L4 translation to frontend port
 	DSRL4XlateFrontend = "frontend"
 
@@ -3119,8 +3122,14 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
 	if c.TunnelPort == 0 {
 		switch c.Tunnel {
 		case TunnelDisabled:
-			// tunnel might still be used by eg. EgressGW
-			c.TunnelPort = defaults.TunnelPortVXLAN
+			// tunnel might still be used by eg. DSR with Geneve dispatch or EgressGW
+			if (c.EnableNodePort || c.KubeProxyReplacement == KubeProxyReplacementStrict) &&
+				c.NodePortMode == NodePortModeDSR &&
+				c.LoadBalancerDSRDispatch == DSRDispatchGeneve {
+				c.TunnelPort = defaults.TunnelPortGeneve
+			} else {
+				c.TunnelPort = defaults.TunnelPortVXLAN
+			}
 		case TunnelVXLAN:
 			c.TunnelPort = defaults.TunnelPortVXLAN
 		case TunnelGeneve:

@@ -85,6 +85,7 @@ var errors = map[uint8]string{
 	187: "L3 translation from IPv4 to IPv6 failed (NAT46)",
 	188: "L3 translation from IPv6 to IPv4 failed (NAT64)",
 	189: "Authentication required",
+	193: "Unsupported packet protocol for DSR encapsulation",
 	194: "No egress gateway found",
 	196: "TTL exceeded",
 	197: "No node ID found",

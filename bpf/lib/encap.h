@@ -92,7 +92,8 @@ __encap_with_nodeid(struct __ctx_buff *ctx, __u32 tunnel_endpoint,
 
 	cilium_dbg(ctx, DBG_ENCAP, node_id, seclabel);
 
-	ret = ctx_set_encap_info(ctx, node_id, seclabel, dstid, vni, ifindex);
+	ret = ctx_set_encap_info(ctx, node_id, seclabel, dstid, vni,
+				 NULL, 0, ifindex);
 	if (ret == CTX_ACT_REDIRECT)
 		send_trace_notify(ctx, TRACE_TO_OVERLAY, seclabel, dstid, 0, *ifindex,
 				  ct_reason, monitor);
@@ -162,6 +163,7 @@ __encap_and_redirect_lxc(struct __ctx_buff *ctx, __u32 tunnel_endpoint,
 	 * apply the correct reverse DNAT.
 	 * See #14674 for details.
 	 */
+
 	ret = __encap_with_nodeid(ctx, tunnel_endpoint, seclabel, dstid, NOT_VTEP_DST,
 				  trace->reason, trace->monitor, &ifindex);
 	if (ret != CTX_ACT_REDIRECT)
@@ -236,5 +238,58 @@ encap_and_redirect_netdev(struct __ctx_buff *ctx, struct tunnel_key *k,
 }
 #endif /* TUNNEL_MODE */
 
+#if defined(ENABLE_DSR) && DSR_ENCAP_MODE == DSR_ENCAP_GENEVE
+static __always_inline int
+__encap_with_nodeid_opt(struct __ctx_buff *ctx,
+			__u32 tunnel_endpoint,
+			__u32 seclabel, __u32 dstid, __u32 vni,
+			void *opt, __u32 opt_len,
+			enum trace_reason ct_reason,
+			__u32 monitor, __u32 *ifindex)
+{
+	__u32 node_id;
+
+	/* When encapsulating, a packet originating from the local host is
+	 * being considered as a packet from a remote node as it is being
+	 * received.
+	 */
+	if (seclabel == HOST_ID)
+		seclabel = LOCAL_NODE_ID;
+
+	node_id = bpf_ntohl(tunnel_endpoint);
+
+	cilium_dbg(ctx, DBG_ENCAP, node_id, seclabel);
+
+	send_trace_notify(ctx, TRACE_TO_OVERLAY, seclabel, dstid, 0, *ifindex,
+			  ct_reason, monitor);
+
+	/* dstid is unused. */
+	return ctx_set_encap_info(ctx, node_id, seclabel, 0, vni, opt,
+				  opt_len, ifindex);
+}
+
+static __always_inline void
+set_geneve_dsr_opt4(__be16 port, __be32 addr, struct geneve_dsr_opt4 *gopt)
+{
+	memset(gopt, 0, sizeof(*gopt));
+	gopt->hdr.opt_class = bpf_htons(DSR_GENEVE_OPT_CLASS);
+	gopt->hdr.type = DSR_GENEVE_OPT_TYPE;
+	gopt->hdr.length = DSR_IPV4_GENEVE_OPT_LEN;
+	gopt->addr = addr;
+	gopt->port = port;
+}
+
+static __always_inline void
+set_geneve_dsr_opt6(__be16 port, const union v6addr *addr,
+		    struct geneve_dsr_opt6 *gopt)
+{
+	memset(gopt, 0, sizeof(*gopt));
+	gopt->hdr.opt_class = bpf_htons(DSR_GENEVE_OPT_CLASS);
+	gopt->hdr.type = DSR_GENEVE_OPT_TYPE;
+	gopt->hdr.length = DSR_IPV6_GENEVE_OPT_LEN;
+	ipv6_addr_copy((union v6addr *)&gopt->addr, addr);
+	gopt->port = port;
+}
+#endif /* ENABLE_DSR && DSR_ENCAP_GENEVE */
 #endif /* HAVE_ENCAP */
 #endif /* __LIB_ENCAP_H_ */

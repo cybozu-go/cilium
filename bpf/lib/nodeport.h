@@ -59,6 +59,31 @@ static __always_inline bool nodeport_uses_dsr(__u8 nexthdr __maybe_unused)
 # endif
 }
 
+#ifdef HAVE_ENCAP
+static __always_inline int
+nodeport_add_tunnel_encap(struct __ctx_buff *ctx,
+			  __be32 dst_ip, __u32 src_sec_identity, __u32 dst_sec_identity,
+			  enum trace_reason ct_reason, __u32 monitor, __u32 *ifindex)
+{
+	return __encap_with_nodeid(ctx, dst_ip,
+				   src_sec_identity, dst_sec_identity, NOT_VTEP_DST,
+				   ct_reason, monitor, ifindex);
+}
+
+# if defined(ENABLE_DSR) && DSR_ENCAP_MODE == DSR_ENCAP_GENEVE
+static __always_inline int
+nodeport_add_tunnel_encap_opt(struct __ctx_buff *ctx,
+			      __be32 dst_ip, __u32 src_sec_identity, __u32 dst_sec_identity,
+			      void *opt, __u32 opt_len, enum trace_reason ct_reason,
+			      __u32 monitor, __u32 *ifindex)
+{
+	return __encap_with_nodeid_opt(ctx, dst_ip,
+				       src_sec_identity, dst_sec_identity, NOT_VTEP_DST,
+				       opt, opt_len, ct_reason, monitor, ifindex);
+}
+# endif
+#endif /* HAVE_ENCAP */
+
 static __always_inline bool
 bpf_skip_recirculation(const struct __ctx_buff *ctx __maybe_unused)
 {
@@ -535,10 +560,12 @@ int tail_nodeport_ipv6_dsr(struct __ctx_buff *ctx)
 			    ctx_load_meta(ctx, CB_HINT), &ohead);
 #elif DSR_ENCAP_MODE == DSR_ENCAP_NONE
 	ret = dsr_set_ext6(ctx, ip6, &addr, port, &ohead);
+#elif DSR_ENCAP_MODE == DSR_ENCAP_GENEVE
+	ret = 0;
 #else
 # error "Invalid load balancer DSR encapsulation mode!"
 #endif
-	if (unlikely(ret)) {
+	if (IS_ERR(ret)) {
 		if (dsr_fail_needs_reply(ret))
 			return dsr_reply_icmp6(ctx, ip6, &addr, port, ret, ohead);
 		goto drop_err;
@@ -863,6 +890,7 @@ int tail_nodeport_nat_egress_ipv6(struct __ctx_buff *ctx)
 	dst = (union v6addr *)&ip6->daddr;
 	info = ipcache_lookup6(&IPCACHE_MAP, dst, V6_CACHE_KEY_LEN);
 	if (info && info->tunnel_endpoint != 0) {
+		/* FIX ME: IPv6 is not used, so src_ip and src_port are 0 as a dummy value. */
 		ret = __encap_with_nodeid(ctx, info->tunnel_endpoint,
 					  WORLD_ID,
 					  info->sec_label,
@@ -1230,6 +1258,7 @@ static __always_inline int rev_nodeport_lb6(struct __ctx_buff *ctx, __u32 *ifind
 
 			info = ipcache_lookup6(&IPCACHE_MAP, dst, V6_CACHE_KEY_LEN);
 			if (info != NULL && info->tunnel_endpoint != 0) {
+				/* FIX ME: IPv6 is not used, so src_ip and src_port are 0 as a dummy value. */
 				return __encap_with_nodeid(ctx, info->tunnel_endpoint,
 							   SECLABEL, info->sec_label,
 							   NOT_VTEP_DST,
@@ -1500,7 +1529,75 @@ static __always_inline __be32 rss_gen_src4(__be32 client, __be32 l4_hint)
 		src |= bpf_htonl(hash_32(client ^ l4_hint, bits));
 	return src;
 }
+#endif /*DSR_ENCAP_MODE*/
 
+#if DSR_ENCAP_MODE == DSR_ENCAP_GENEVE
+static __always_inline int encap_geneve_dsr_opt4(struct __ctx_buff *ctx, int l3_off __maybe_unused,
+						 struct iphdr *ip4, __be32 svc_addr,
+						 __be16 svc_port, __u32 *ifindex, __be16 *ohead)
+{
+	struct remote_endpoint_info *info __maybe_unused;
+	struct geneve_dsr_opt4 gopt;
+	bool need_opt = true;
+	__u16 encap_len = sizeof(struct iphdr) + sizeof(struct udphdr) +
+		sizeof(struct genevehdr) + ETH_HLEN;
+	__u16 total_len = bpf_ntohs(ip4->tot_len);
+	__u32 src_sec_identity = WORLD_ID;
+	__u32 dst_sec_identity;
+	__be32 tunnel_endpoint;
+
+	info = ipcache_lookup4(&IPCACHE_MAP, ip4->daddr, V4_CACHE_KEY_LEN);
+	if (!info || info->tunnel_endpoint == 0)
+		return DROP_NO_TUNNEL_ENDPOINT;
+
+	tunnel_endpoint = info->tunnel_endpoint;
+	dst_sec_identity = info->sec_label;
+
+	if (ip4->protocol == IPPROTO_TCP) {
+		union tcp_flags tcp_flags = { .value = 0 };
+
+		if (l4_load_tcp_flags(ctx, l3_off + ipv4_hdrlen(ip4), &tcp_flags) < 0)
+			return DROP_CT_INVALID_HDR;
+
+		/* The GENEVE option is required only for the first packet
+		 * (SYN), in the case of TCP, as for further packets of the
+		 * same connection a remote node will use a NAT entry to
+		 * reverse xlate a reply.
+		 */
+		if (!(tcp_flags.value & (TCP_FLAG_SYN)))
+			need_opt = false;
+	}
+
+	if (need_opt) {
+		encap_len += sizeof(struct geneve_dsr_opt4);
+		set_geneve_dsr_opt4(svc_port, svc_addr, &gopt);
+	}
+
+	if (dsr_is_too_big(ctx, total_len + encap_len)) {
+		*ohead = encap_len;
+		return DROP_FRAG_NEEDED;
+	}
+
+	if (need_opt)
+		return nodeport_add_tunnel_encap_opt(ctx,
+						     tunnel_endpoint,
+						     src_sec_identity,
+						     dst_sec_identity,
+						     &gopt,
+						     sizeof(gopt),
+						     (enum trace_reason)CT_NEW,
+						     TRACE_PAYLOAD_LEN,
+						     ifindex);
+
+	return nodeport_add_tunnel_encap(ctx,
+					 tunnel_endpoint,
+					 src_sec_identity,
+					 dst_sec_identity,
+					 (enum trace_reason)CT_NEW,
+					 TRACE_PAYLOAD_LEN,
+					 ifindex);
+}
+#elif DSR_ENCAP_MODE == DSR_ENCAP_IPIP
 /*
  * Original packet: [clientIP:clientPort -> serviceIP:servicePort] } IP/L4
  *
@@ -1619,9 +1716,8 @@ static __always_inline int dsr_set_opt4(struct __ctx_buff *ctx,
 #endif /* DSR_ENCAP_MODE */
 
 static __always_inline int
-nodeport_extract_dsr_v4(struct __ctx_buff *ctx, const struct iphdr *ip4,
-			const struct ipv4_ct_tuple *tuple, int l4_off,
-			__be32 *addr,
+nodeport_extract_dsr_v4(struct __ctx_buff *ctx, const struct iphdr *ip4 __maybe_unused,
+			const struct ipv4_ct_tuple *tuple, int l4_off, __be32 *addr,
 			__be16 *port, bool *dsr)
 {
 	struct ipv4_ct_tuple tmp = *tuple;
@@ -1652,6 +1748,25 @@ nodeport_extract_dsr_v4(struct __ctx_buff *ctx, const struct iphdr *ip4,
 		}
 	}
 
+#if defined(IS_BPF_OVERLAY)
+	{
+		struct geneve_dsr_opt4 gopt;
+		int ret = 0;
+
+		ret = ctx_get_tunnel_opt(ctx, &gopt, sizeof(gopt));
+
+		if (ret > 0) {
+			if (gopt.hdr.opt_class == bpf_htons(DSR_GENEVE_OPT_CLASS) &&
+			    gopt.hdr.type == DSR_GENEVE_OPT_TYPE) {
+				*dsr = true;
+				*port = gopt.port;
+				*addr = gopt.addr;
+				return 0;
+			}
+		}
+	}
+#else
+
 	/* Check whether IPv4 header contains a 64-bit option (IPv4 header
 	 * w/o option (5 x 32-bit words) + the DSR option (2 x 32-bit words)).
 	 */
@@ -1669,6 +1784,7 @@ nodeport_extract_dsr_v4(struct __ctx_buff *ctx, const struct iphdr *ip4,
 			return 0;
 		}
 	}
+ #endif
 
 	/* SYN for a new connection that's not / no longer DSR.
 	 * If it's reopened, avoid sending subsequent traffic down the DSR path.
@@ -1831,6 +1947,7 @@ int tail_nodeport_ipv4_dsr(struct __ctx_buff *ctx)
 	__u16 port;
 	__be16 ohead = 0;
 	int ret, ext_err = 0;
+	__u32 oif __maybe_unused = 0;
 
 	if (!revalidate_data(ctx, &data, &data_end, &ip4)) {
 		ret = DROP_INVALID;
@@ -1847,10 +1964,20 @@ int tail_nodeport_ipv4_dsr(struct __ctx_buff *ctx)
 	ret = dsr_set_opt4(ctx, ip4,
 			   addr,
 			   port, &ohead);
+#elif DSR_ENCAP_MODE == DSR_ENCAP_GENEVE
+    ret = encap_geneve_dsr_opt4(ctx, ctx_load_meta(ctx, CB_DSR_L3_OFF),
+				ip4, addr, port, &oif, &ohead);
+	if (!IS_ERR(ret)) {
+		if (ret == CTX_ACT_REDIRECT && oif) {
+			cilium_capture_out(ctx);
+			return ctx_redirect(ctx, oif, 0);
+		}
+	}
+
 #else
 # error "Invalid load balancer DSR encapsulation mode!"
 #endif
-	if (unlikely(ret)) {
+	if (IS_ERR(ret)) {
 		if (dsr_fail_needs_reply(ret))
 			return dsr_reply_icmp4(ctx, ip4, addr, port, ret, ohead);
 		goto drop_err;
@@ -2064,12 +2191,14 @@ int tail_nodeport_nat_egress_ipv4(struct __ctx_buff *ctx)
 		.reason = (enum trace_reason)CT_NEW,
 		.monitor = TRACE_PAYLOAD_LEN,
 	};
+	struct ipv4_ct_tuple tuple __maybe_unused = {};
 	int verdict = CTX_ACT_REDIRECT;
 	void *data, *data_end;
 	struct iphdr *ip4;
 	bool l2_hdr_required = true;
 	__s8 ext_err = 0;
 	int ret;
+	int l4_off __maybe_unused = 0;
 
 #ifdef TUNNEL_MODE
 	struct remote_endpoint_info *info;
@@ -2100,7 +2229,13 @@ int tail_nodeport_nat_egress_ipv4(struct __ctx_buff *ctx)
 		 * bypass any netpol which disallows LB requests from
 		 * outside.
 		 */
-		ret = __encap_with_nodeid(ctx, info->tunnel_endpoint,
+
+		ret = lb4_extract_tuple(ctx, ip4, ETH_HLEN, &l4_off, &tuple);
+		if (IS_ERR(ret))
+			goto drop_err;
+
+		ret = __encap_with_nodeid(ctx,
+					  info->tunnel_endpoint,
 					  WORLD_ID,
 					  info->sec_label,
 					  NOT_VTEP_DST,
@@ -2259,6 +2394,8 @@ skip_service_lookup:
 
 #ifdef ENABLE_DSR
 		if (nodeport_uses_dsr4(&tuple)) {
+#if (defined(IS_BPF_OVERLAY) && DSR_ENCAP_MODE == DSR_ENCAP_GENEVE) || \
+	(!defined(IS_BPF_OVERLAY) && DSR_ENCAP_MODE != DSR_ENCAP_GENEVE)
 			bool dsr = false;
 
 			/* Check if packet has embedded DSR info, or belongs to
@@ -2276,6 +2413,7 @@ skip_service_lookup:
 			if (IS_ERR(ret))
 				return ret;
 
+#endif
 #ifndef ENABLE_MASQUERADE
 			/* The packet is DSR-eligible, so we know for sure that it is
 			 * not reply traffic by a remote backend which would require
@@ -2359,15 +2497,17 @@ redo:
 	}
 
 	/* TX request to remote backend: */
-	edt_set_aggregate(ctx, 0);
 	if (nodeport_uses_dsr4(&tuple)) {
-#if DSR_ENCAP_MODE == DSR_ENCAP_IPIP
+#if DSR_ENCAP_MODE == DSR_ENCAP_GENEVE
+		ctx_store_meta(ctx, CB_PORT, key.dport);
+		ctx_store_meta(ctx, CB_ADDR_V4, key.address);
+		ctx_store_meta(ctx, CB_DSR_SRC_LABEL, src_identity);
+		ctx_store_meta(ctx, CB_DSR_L3_OFF, l3_off);
+#elif DSR_ENCAP_MODE == DSR_ENCAP_IPIP
 		ctx_store_meta(ctx, CB_HINT,
 			       ((__u32)tuple.sport << 16) | tuple.dport);
 		ctx_store_meta(ctx, CB_ADDR_V4, tuple.daddr);
 #elif DSR_ENCAP_MODE == DSR_ENCAP_NONE
-		ctx_store_meta(ctx, CB_PORT, key.dport);
-		ctx_store_meta(ctx, CB_ADDR_V4, key.address);
 #endif /* DSR_ENCAP_MODE */
 		ep_tail_call(ctx, CILIUM_CALL_IPV4_NODEPORT_DSR);
 	} else {
@@ -2459,6 +2599,7 @@ static __always_inline int rev_nodeport_lb4(struct __ctx_buff *ctx, __u32 *ifind
 	bool l2_hdr_required = true;
 	__u32 tunnel_endpoint __maybe_unused = 0;
 	__u32 dst_id __maybe_unused = 0;
+	__be16 src_port __maybe_unused = 0;
 	bool has_l4_header;
 
 	if (!revalidate_data(ctx, &data, &data_end, &ip4))
@@ -2591,6 +2732,7 @@ out:
 
 #if (defined(ENABLE_EGRESS_GATEWAY) || defined(TUNNEL_MODE))
 encap_redirect:
+
 	return __encap_with_nodeid(ctx, tunnel_endpoint, SECLABEL, dst_id,
 				   NOT_VTEP_DST, reason, monitor, ifindex);
 #endif
