@@ -25,6 +25,13 @@ import (
 	"go.universe.tf/metallb/pkg/allocator/k8salloc"
 )
 
+// Imported from
+// https://github.com/metallb/metallb/blob/5765ee504d21a3a237d9dab223ca707661269ecd/controller/service.go#L32
+const (
+	AnnotationPrefix          = "metallb.universe.tf"
+	AnnotationLoadBalancerIPs = AnnotationPrefix + "/" + "loadBalancerIPs"
+)
+
 func (c *Controller) convergeBalancer(l log.Logger, key string, svc *v1.Service) bool {
 	var lbIP net.IP
 
@@ -85,6 +92,26 @@ func (c *Controller) convergeBalancer(l log.Logger, key string, svc *v1.Service)
 			c.clearServiceState(key, svc)
 			lbIP = nil
 		}
+
+		// 2025/01/16
+		// For supporting requiring specific IPs by users.
+		// This code path is referenced by the upstream metallb's implementation.
+		// The upstream implementation is following.
+		// https://github.com/metallb/metallb/blob/5765ee504d21a3a237d9dab223ca707661269ecd/controller/service.go#L137
+		desiredIP, err := getDesiredIPs(svc)
+		if err != nil {
+			l.Log("event", "loadBalancerIP", "error", err, "msg", "invalid requested loadBalancer IP")
+			c.clearServiceState(key, svc)
+			lbIP = nil
+		}
+		// Validation for existing loadBalancerIP and desiredIP
+		// When requiring the specific IP address for existing LoadBalancer services, its IP must be equal to the existing one.
+		// And in such situation, only logging the error, and it ignores desired the IP address.
+		if desiredIP != nil && !desiredIP.Equal(lbIP) {
+			l.Log("event", "loadBalancerIP", "error", err, "msg", "requiring different IP for the existing LoadBalancer")
+			c.Client.Errorf(svc, "AllocationFailed", "requiring different IP for the existing LoadBalancer(%q)", key)
+		}
+		// End here
 	}
 
 	// User set or changed the desired LB IP, nuke the
@@ -152,15 +179,35 @@ func (c *Controller) allocateIP(key string, svc *v1.Service) (net.IP, error) {
 	}
 	isIPv6 := clusterIP.To4() == nil
 
+	// 2025/01/16
+	// For supporting requiring specific IPs by users.
+	// This code path is referenced by the upstream metallb's implementation.
+	// The upstream implementation is following.
+	// https://github.com/metallb/metallb/blob/5765ee504d21a3a237d9dab223ca707661269ecd/controller/service.go#L257
+	desiredIP, err := getDesiredIPs(svc)
+	if err != nil {
+		return nil, err
+	}
+
 	// If the user asked for a specific IP, try that.
-	if svc.Spec.LoadBalancerIP != "" {
+	if svc.Spec.LoadBalancerIP != "" || desiredIP != nil {
 		ip := net.ParseIP(svc.Spec.LoadBalancerIP)
+		// Note!!
+		// 2025/01/16
+		// For supporting requiring specific IPs by users.
+		// .spec.LoadBalancerIP is removed in Kubernetes 1.24.
+		// So here, for simplifying, overwriting and reusing existing codes.
+		ip = desiredIP
 		if ip == nil {
 			return nil, fmt.Errorf("invalid spec.loadBalancerIP %q", svc.Spec.LoadBalancerIP)
 		}
 		if (ip.To4() == nil) != isIPv6 {
 			return nil, fmt.Errorf("requested spec.loadBalancerIP %q does not match the ipFamily of the service", svc.Spec.LoadBalancerIP)
 		}
+
+		// 2025/01/16
+		// For supporting requiring specific IPs by users.
+		// When requiring IP in annotation, it is preferred over specifying an address pool.
 		if err := c.IPs.Assign(key, ip, k8salloc.Ports(svc), k8salloc.SharingKey(svc), k8salloc.BackendKey(svc)); err != nil {
 			return nil, err
 		}
@@ -179,4 +226,35 @@ func (c *Controller) allocateIP(key string, svc *v1.Service) (net.IP, error) {
 
 	// Okay, in that case just bruteforce across all pools.
 	return c.IPs.Allocate(key, isIPv6, k8salloc.Ports(svc), k8salloc.SharingKey(svc), k8salloc.BackendKey(svc))
+}
+
+// Referenced from https://github.com/metallb/metallb/blob/5765ee504d21a3a237d9dab223ca707661269ecd/controller/service.go#L299
+// Changes from the upstream
+// - Remove ipv6 support
+// - Remove multiple required IP addresses support
+// - Remove service spec.LoadBalancerIP support(spec.LoadBalancerIP is deprecated. ref: https://github.com/kubernetes/kubernetes/pull/107235)
+func getDesiredIPs(svc *v1.Service) (net.IP, error) {
+	desiredLbIPStr := valueForAnnotation(svc.Annotations, AnnotationLoadBalancerIPs)
+	if desiredLbIPStr == "" {
+		return nil, nil
+	}
+	desiredLbIP := net.ParseIP(desiredLbIPStr)
+	if desiredLbIP == nil {
+		return nil, fmt.Errorf("invalid %s: %q", AnnotationLoadBalancerIPs, desiredLbIPStr)
+	}
+
+	if desiredLbIP.To4() == nil {
+		return nil, fmt.Errorf("ipv6 is not supported in %s: %q", AnnotationLoadBalancerIPs, desiredLbIPStr)
+	}
+	return desiredLbIP, nil
+}
+
+// Referenced from https://github.com/metallb/metallb/blob/5765ee504d21a3a237d9dab223ca707661269ecd/controller/service.go#L353
+// Changes from the upstream.
+// - remove the `deprecatedAnnotation` argument
+func valueForAnnotation(annotations map[string]string, annotation string) string {
+	if value, ok := annotations[annotation]; ok {
+		return value
+	}
+	return ""
 }
