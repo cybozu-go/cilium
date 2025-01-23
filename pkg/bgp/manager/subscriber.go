@@ -6,6 +6,8 @@
 package manager
 
 import (
+	"time"
+
 	"github.com/sirupsen/logrus"
 	metallbk8s "go.universe.tf/metallb/pkg/k8s"
 	"go.universe.tf/metallb/pkg/k8s/types"
@@ -84,6 +86,77 @@ func logInvalidObject(obj *slim_corev1.Service, err error) {
 }
 
 type svcEvent string
+
+// beforeRun must be executed before the run loop starts.
+// It is responsible for assigning IP addresses to existing LB Services.
+func (m *Manager) beforeRun() {
+	l := log.WithFields(logrus.Fields{
+		"component": "Manager.beforeRun",
+	})
+
+	// note: indexer is expected to be already cached with all the existing services.
+	keys := m.indexer.ListKeys()
+
+	var retryKeys []string
+	for i := 0; i < 60; i++ {
+		retryKeys = []string{}
+
+		for _, k := range keys {
+			svc, exists, err := m.indexer.GetByKey(k)
+			if err != nil {
+				l.WithError(err).WithField("service", k).Error("failed to get service by key")
+				retryKeys = append(retryKeys, k)
+				continue
+			}
+
+			_, ok := svc.(*slim_corev1.Service)
+			if !exists || !ok {
+				l.WithField("service", k).Info("skip reconcile because service does not exist")
+				continue
+			}
+
+			if svc.(*slim_corev1.Service).Spec.Type != slim_corev1.ServiceTypeLoadBalancer {
+				l.WithField("service", k).Info("skip reconcile because service is not LoadBalancer")
+				continue
+			}
+
+			if len(svc.(*slim_corev1.Service).Status.LoadBalancer.Ingress) == 0 {
+				l.WithField("service", k).Info("skip reconcile because service does not have a load balancer IP")
+				continue
+			}
+
+			st := m.reconcile(k, svc.(*slim_corev1.Service))
+			switch st {
+			case types.SyncStateSuccess: // Nothing to do.
+				l.WithField("service", k).Info("reconciled service")
+			case types.SyncStateError: // Re-add upon error to retry.
+				l.WithField("service", k).WithField("status", st).Warn("failed to reconcile service")
+				retryKeys = append(retryKeys, k)
+			case types.SyncStateReprocessAll:
+				l.WithField("service", k).WithField("status", st).Info("reprocess all services")
+				retryKeys = m.indexer.ListKeys()
+				break
+			}
+		}
+
+		// If there are no keys to retry, then we are done.
+		if len(retryKeys) == 0 {
+			break
+		}
+
+		keys = retryKeys
+		time.Sleep(1 * time.Second)
+	}
+
+	// if there are still keys to retry, then we give up.
+	if len(retryKeys) > 0 {
+		for _, k := range retryKeys {
+			l.WithField("service", k).Warn("over 60 retries, giving up reconciliation")
+		}
+	}
+
+	l.Info("finished beforeRun")
+}
 
 // run runs the reconciliation loop, fetching events off of the queue to
 // process. This loop is only stopped (implicitly) when the Operator is

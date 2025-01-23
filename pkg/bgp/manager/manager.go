@@ -31,7 +31,11 @@ func New(ctx context.Context, clientset client.Clientset, indexer cache.Store) (
 
 		indexer: indexer,
 	}
-	go mgr.run()
+
+	go func() {
+		mgr.beforeRun()
+		mgr.run()
+	}()
 
 	return mgr, nil
 }
