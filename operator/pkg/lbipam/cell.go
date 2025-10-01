@@ -32,13 +32,19 @@ var Cell = cell.Module(
 	// Provide LB-IPAM related metrics
 	metrics.Metric(newMetrics),
 	// Register configuration flags
-	cell.Config(lbipamConfig{}),
+	cell.Config(lbipamConfig{MinimumLBIPPoolsRequired: 1}),
+)
+
+const (
+	MinimumLBIPPoolsRequired = "minimum-lbip-pools-required"
 )
 
 type lbipamConfig struct {
+	MinimumLBIPPoolsRequired int
 }
 
 func (lc lbipamConfig) Flags(flags *pflag.FlagSet) {
+	flags.Int(MinimumLBIPPoolsRequired, lc.MinimumLBIPPoolsRequired, "Minimum LBIP pools required before starting svc reconciliation.")
 }
 
 func (lc lbipamConfig) IsEnabled() bool {
@@ -84,16 +90,17 @@ func newLBIPAMCell(params lbipamCellParams) *LBIPAM {
 	}
 
 	lbIPAM := newLBIPAM(lbIPAMParams{
-		logger:       params.Logger,
-		poolResource: params.PoolResource,
-		svcResource:  params.SvcResource,
-		metrics:      params.Metrics,
-		lbClasses:    lbClasses,
-		ipv4Enabled:  option.Config.IPv4Enabled(),
-		ipv6Enabled:  option.Config.IPv6Enabled(),
-		poolClient:   params.Clientset.CiliumV2alpha1().CiliumLoadBalancerIPPools(),
-		svcClient:    params.Clientset.Slim().CoreV1(),
-		jobGroup:     params.JobGroup,
+		logger:                   params.Logger,
+		poolResource:             params.PoolResource,
+		svcResource:              params.SvcResource,
+		metrics:                  params.Metrics,
+		lbClasses:                lbClasses,
+		ipv4Enabled:              option.Config.IPv4Enabled(),
+		ipv6Enabled:              option.Config.IPv6Enabled(),
+		minimumLBIPPoolsRequired: params.Config.MinimumLBIPPoolsRequired,
+		poolClient:               params.Clientset.CiliumV2alpha1().CiliumLoadBalancerIPPools(),
+		svcClient:                params.Clientset.Slim().CoreV1(),
+		jobGroup:                 params.JobGroup,
 	})
 
 	lbIPAM.jobGroup.Add(

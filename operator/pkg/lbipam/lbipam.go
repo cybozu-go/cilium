@@ -73,6 +73,8 @@ type lbIPAMParams struct {
 	ipv4Enabled bool
 	ipv6Enabled bool
 
+	minimumLBIPPoolsRequired int
+
 	poolClient poolClient
 	svcClient  client_typed_v1.ServicesGetter
 
@@ -205,9 +207,9 @@ func (ipam *LBIPAM) initialize(
 			ipam.handlePoolEvent(ctx, event)
 		}
 
-		// Pools have been synchronized and we've got more than
-		// one pool, continue initialization.
-		if poolsSynced && len(ipam.pools) > 0 {
+		// Pools have been synchronized and we've got more pools than
+		// required, continue initialization.
+		if poolsSynced && len(ipam.pools) >= ipam.minimumLBIPPoolsRequired {
 			break
 		}
 	}
