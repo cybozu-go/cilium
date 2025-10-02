@@ -1835,6 +1835,20 @@ func (ipam *LBIPAM) settleConflicts(ctx context.Context) error {
 		}
 	}
 
+	// Count the number of conflicting pools and update the metric.
+	var conflictingPools float64
+	for _, pool := range ipam.pools {
+		lbRanges, _ := ipam.rangesStore.GetRangesForPool(pool.GetName())
+		// When a pool is marked as conflicting, all of its lbRanges are
+		// internally disabled. Therefore, checking a single lbRange
+		// is sufficient to conclude that the pool is conflicting.
+		if len(lbRanges) > 0 && lbRanges[0].internallyDisabled {
+			conflictingPools++
+		}
+	}
+
+	ipam.metrics.ConflictingPools.Set(conflictingPools)
+
 	return nil
 }
 
@@ -1849,7 +1863,7 @@ func (ipam *LBIPAM) markPoolConflicting(
 		return nil
 	}
 
-	ipam.metrics.ConflictingPools.Inc()
+	/* ipam.metrics.ConflictingPools.Inc() */
 
 	ipam.logger.WithFields(logrus.Fields{
 		"pool1-name":  targetPool.Name,
@@ -1894,7 +1908,7 @@ func (ipam *LBIPAM) unmarkPool(ctx context.Context, targetPool *cilium_api_v2alp
 		poolRange.internallyDisabled = false
 	}
 
-	ipam.metrics.ConflictingPools.Dec()
+	/* ipam.metrics.ConflictingPools.Dec() */
 
 	if ipam.setPoolCondition(targetPool, ciliumPoolConflict, meta_v1.ConditionFalse, "resolved", "") {
 		err := ipam.patchPoolStatus(ctx, targetPool)
