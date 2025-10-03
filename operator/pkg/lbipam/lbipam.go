@@ -73,6 +73,8 @@ type lbIPAMParams struct {
 	ipv4Enabled bool
 	ipv6Enabled bool
 
+	minimumLBIPPoolsRequired int
+
 	poolClient poolClient
 	svcClient  client_typed_v1.ServicesGetter
 
@@ -205,9 +207,9 @@ func (ipam *LBIPAM) initialize(
 			ipam.handlePoolEvent(ctx, event)
 		}
 
-		// Pools have been synchronized and we've got more than
-		// one pool, continue initialization.
-		if poolsSynced && len(ipam.pools) > 0 {
+		// Pools have been synchronized and we've got more pools than
+		// required, continue initialization.
+		if poolsSynced && len(ipam.pools) >= ipam.minimumLBIPPoolsRequired {
 			break
 		}
 	}
@@ -483,7 +485,7 @@ func (ipam *LBIPAM) stripInvalidAllocations(sv *ServiceView) error {
 		alloc := sv.AllocatedIPs[allocIdx]
 
 		releaseAllocIP := func() error {
-			ipam.logger.Debugf("removing allocation '%s' from '%s'", alloc.IP.String(), sv.Key.String())
+			ipam.logger.Warnf("removing allocation '%s' from '%s'", alloc.IP.String(), sv.Key.String())
 			sharingGroup, _ := alloc.Origin.alloc.Get(alloc.IP)
 
 			idx := slices.Index(sharingGroup, sv)
@@ -624,16 +626,19 @@ func (ipam *LBIPAM) stripOrImportIngresses(sv *ServiceView) (statusModified bool
 				}
 				if !found {
 					// Don't keep ingress
+					ipam.logger.Warnf("stripping '%s' from '%s' as it does not match any of the requested IPs", ingress.IP, sv.Key.String())
 					continue
 				}
 			}
 
 			if isIPv6(ip) {
 				if !sv.RequestedFamilies.IPv6 {
+					ipam.logger.Warnf("stripping '%s' from '%s' as it does not match the requested IP families", ingress.IP, sv.Key.String())
 					continue
 				}
 			} else {
 				if !sv.RequestedFamilies.IPv4 {
+					ipam.logger.Warnf("stripping '%s' from '%s' as it does not match the requested IP families", ingress.IP, sv.Key.String())
 					continue
 				}
 			}
@@ -652,6 +657,7 @@ func (ipam *LBIPAM) stripOrImportIngresses(sv *ServiceView) (statusModified bool
 				if errors.Is(err, ipalloc.ErrInUse) {
 					// The IP is already allocated, defer to regular allocation logic to deterime
 					// if this service can share the allocation.
+					ipam.logger.Warnf("stripping '%s' from '%s' as it is already in use and cannot be shared", ingress.IP, sv.Key.String())
 					continue
 				}
 
@@ -667,6 +673,8 @@ func (ipam *LBIPAM) stripOrImportIngresses(sv *ServiceView) (statusModified bool
 			if sv.SharingKey != "" {
 				ipam.rangesStore.AddServiceViewIPForSharingKey(sv.SharingKey, &sv.AllocatedIPs[len(sv.AllocatedIPs)-1])
 			}
+
+			ipam.logger.Infof("importing '%s' for '%s'", ingress.IP, sv.Key.String())
 		}
 
 		newIngresses = append(newIngresses, ingress)
@@ -1827,6 +1835,20 @@ func (ipam *LBIPAM) settleConflicts(ctx context.Context) error {
 		}
 	}
 
+	// Count the number of conflicting pools and update the metric.
+	var conflictingPools float64
+	for _, pool := range ipam.pools {
+		lbRanges, _ := ipam.rangesStore.GetRangesForPool(pool.GetName())
+		// When a pool is marked as conflicting, all of its lbRanges are
+		// internally disabled. Therefore, checking a single lbRange
+		// is sufficient to conclude that the pool is conflicting.
+		if len(lbRanges) > 0 && lbRanges[0].internallyDisabled {
+			conflictingPools++
+		}
+	}
+
+	ipam.metrics.ConflictingPools.Set(conflictingPools)
+
 	return nil
 }
 
@@ -1841,7 +1863,7 @@ func (ipam *LBIPAM) markPoolConflicting(
 		return nil
 	}
 
-	ipam.metrics.ConflictingPools.Inc()
+	/* ipam.metrics.ConflictingPools.Inc() */
 
 	ipam.logger.WithFields(logrus.Fields{
 		"pool1-name":  targetPool.Name,
@@ -1886,7 +1908,7 @@ func (ipam *LBIPAM) unmarkPool(ctx context.Context, targetPool *cilium_api_v2alp
 		poolRange.internallyDisabled = false
 	}
 
-	ipam.metrics.ConflictingPools.Dec()
+	/* ipam.metrics.ConflictingPools.Dec() */
 
 	if ipam.setPoolCondition(targetPool, ciliumPoolConflict, meta_v1.ConditionFalse, "resolved", "") {
 		err := ipam.patchPoolStatus(ctx, targetPool)
