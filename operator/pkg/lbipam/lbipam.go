@@ -77,6 +77,8 @@ type lbIPAMParams struct {
 	ipv6Enabled bool
 	lbProtoDiff bool
 
+	minimumLBIPPoolsRequired int
+
 	poolClient poolClient
 	svcClient  client_typed_v1.ServicesGetter
 
@@ -214,9 +216,9 @@ func (ipam *LBIPAM) initialize(
 			ipam.handlePoolEvent(ctx, event)
 		}
 
-		// Pools have been synchronized and we've got more than
-		// one pool, continue initialization.
-		if poolsSynced && len(ipam.pools) > 0 {
+		// Pools have been synchronized and we've got more pools than
+		// required, continue initialization.
+		if poolsSynced && len(ipam.pools) >= ipam.minimumLBIPPoolsRequired {
 			break
 		}
 	}
@@ -548,7 +550,7 @@ func (ipam *LBIPAM) stripInvalidAllocations(sv *ServiceView) error {
 		alloc := sv.AllocatedIPs[allocIdx]
 
 		releaseAllocIP := func() {
-			ipam.logger.Debug(fmt.Sprintf("removing allocation '%s' from '%s'", alloc.IP, sv.Key))
+			ipam.logger.Warn(fmt.Sprintf("removing allocation '%s' from '%s'", alloc.IP, sv.Key))
 			sharingGroup, _ := alloc.Origin.alloc.Get(alloc.IP)
 
 			idx := slices.Index(sharingGroup, sv)
@@ -686,16 +688,19 @@ func (ipam *LBIPAM) stripOrImportIngresses(sv *ServiceView) (statusModified bool
 				}
 				if !found {
 					// Don't keep ingress
+					ipam.logger.Warn(fmt.Sprintf("stripping '%s' from '%s' as it does not match any of the requested IPs", ingress.IP, sv.Key.String()))
 					continue
 				}
 			}
 
 			if isIPv6(ip) {
 				if !sv.RequestedFamilies.IPv6 {
+					ipam.logger.Warn(fmt.Sprintf("stripping '%s' from '%s' as it does not match the requested IP families", ingress.IP, sv.Key.String()))
 					continue
 				}
 			} else {
 				if !sv.RequestedFamilies.IPv4 {
+					ipam.logger.Warn(fmt.Sprintf("stripping '%s' from '%s' as it does not match the requested IP families", ingress.IP, sv.Key.String()))
 					continue
 				}
 			}
@@ -724,6 +729,7 @@ func (ipam *LBIPAM) stripOrImportIngresses(sv *ServiceView) (statusModified bool
 					)
 					// The IP is already allocated, defer to regular allocation logic to determine
 					// if this service can share the allocation.
+					ipam.logger.Warn(fmt.Sprintf("stripping '%s' from '%s' as it is already in use and cannot be shared", ingress.IP, sv.Key.String()))
 					continue
 				}
 
@@ -739,6 +745,8 @@ func (ipam *LBIPAM) stripOrImportIngresses(sv *ServiceView) (statusModified bool
 			if sv.SharingKey != "" {
 				ipam.rangesStore.AddServiceViewIPForSharingKey(sv.SharingKey, &sv.AllocatedIPs[len(sv.AllocatedIPs)-1])
 			}
+
+			ipam.logger.Info(fmt.Sprintf("importing '%s' for '%s'", ingress.IP, sv.Key.String()))
 		}
 
 		newIngresses = append(newIngresses, ingress)

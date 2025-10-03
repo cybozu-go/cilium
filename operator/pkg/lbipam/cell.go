@@ -40,14 +40,21 @@ var Cell = cell.Module(
 	cell.Config(SharedConfig{
 		DefaultLBServiceIPAM: DefaultLBClassLBIPAM,
 	}),
+	cell.Config(lbipamConfig{MinimumLBIPPoolsRequired: 1}),
 )
 
 type lbipamConfig struct {
-	EnableLBIPAM bool
+	EnableLBIPAM             bool
+	MinimumLBIPPoolsRequired int
 }
+
+const (
+	MinimumLBIPPoolsRequired = "minimum-lbip-pools-required"
+)
 
 func (lc lbipamConfig) Flags(flags *pflag.FlagSet) {
 	flags.BoolVar(&lc.EnableLBIPAM, "enable-lb-ipam", lc.EnableLBIPAM, "Enable LB IPAM")
+	flags.Int(MinimumLBIPPoolsRequired, lc.MinimumLBIPPoolsRequired, "Minimum LBIP pools required before starting svc reconciliation.")
 }
 
 func (lc lbipamConfig) IsEnabled() bool {
@@ -96,20 +103,21 @@ func newLBIPAMCell(params lbipamCellParams) *LBIPAM {
 	}
 
 	lbIPAM := newLBIPAM(lbIPAMParams{
-		logger:       params.Logger,
-		poolResource: params.PoolResource,
-		svcResource:  params.SvcResource,
-		metrics:      params.Metrics,
-		lbClasses:    lbClasses,
-		ipv4Enabled:  option.Config.IPv4Enabled(),
-		ipv6Enabled:  option.Config.IPv6Enabled(),
-		lbProtoDiff:  option.Config.LBProtoDiffEnabled(),
-		poolClient:   params.Clientset.CiliumV2().CiliumLoadBalancerIPPools(),
-		svcClient:    params.Clientset.Slim().CoreV1(),
-		jobGroup:     params.JobGroup,
-		config:       params.Config,
-		defaultIPAM:  params.SharedConfig.DefaultLBServiceIPAM == DefaultLBClassLBIPAM,
-		testCounters: params.TestCounters,
+		logger:                   params.Logger,
+		poolResource:             params.PoolResource,
+		svcResource:              params.SvcResource,
+		metrics:                  params.Metrics,
+		lbClasses:                lbClasses,
+		ipv4Enabled:              option.Config.IPv4Enabled(),
+		ipv6Enabled:              option.Config.IPv6Enabled(),
+		lbProtoDiff:              option.Config.LBProtoDiffEnabled(),
+		poolClient:               params.Clientset.CiliumV2().CiliumLoadBalancerIPPools(),
+		svcClient:                params.Clientset.Slim().CoreV1(),
+		jobGroup:                 params.JobGroup,
+		config:                   params.Config,
+		defaultIPAM:              params.SharedConfig.DefaultLBServiceIPAM == DefaultLBClassLBIPAM,
+		testCounters:             params.TestCounters,
+		minimumLBIPPoolsRequired: params.Config.MinimumLBIPPoolsRequired,
 	})
 
 	lbIPAM.jobGroup.Add(
