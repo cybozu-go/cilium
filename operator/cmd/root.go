@@ -471,7 +471,7 @@ func kvstoreEnabled() bool {
 
 var legacyCell = cell.Invoke(registerLegacyOnLeader)
 
-func registerLegacyOnLeader(lc cell.Lifecycle, clientset k8sClient.Clientset, resources operatorK8s.Resources, factory store.Factory, svcResolver *dial.ServiceResolver) {
+func registerLegacyOnLeader(lc cell.Lifecycle, clientset k8sClient.Clientset, resources operatorK8s.Resources, factory store.Factory, svcResolver *dial.ServiceResolver, shutdowner hive.Shutdowner) {
 	ctx, cancel := context.WithCancel(context.Background())
 	legacy := &legacyOnLeader{
 		ctx:          ctx,
@@ -480,6 +480,7 @@ func registerLegacyOnLeader(lc cell.Lifecycle, clientset k8sClient.Clientset, re
 		resources:    resources,
 		storeFactory: factory,
 		svcResolver:  svcResolver,
+		shutdowner:   shutdowner,
 	}
 	lc.Append(cell.Hook{
 		OnStart: legacy.onStart,
@@ -495,6 +496,7 @@ type legacyOnLeader struct {
 	resources    operatorK8s.Resources
 	storeFactory store.Factory
 	svcResolver  *dial.ServiceResolver
+	shutdowner   hive.Shutdowner
 }
 
 func (legacy *legacyOnLeader) onStop(_ cell.HookContext) error {
@@ -567,7 +569,7 @@ func (legacy *legacyOnLeader) onStart(_ cell.HookContext) error {
 
 	if operatorOption.Config.BGPAnnounceLBIP {
 		log.Info("Starting LB IP allocator")
-		operatorWatchers.StartBGPBetaLBIPAllocator(legacy.ctx, legacy.clientset, legacy.resources.Services)
+		operatorWatchers.StartBGPBetaLBIPAllocator(legacy.ctx, legacy.clientset, legacy.resources.Services, legacy.shutdowner)
 	}
 
 	if kvstoreEnabled() {
