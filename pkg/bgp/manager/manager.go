@@ -12,6 +12,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 
+	"github.com/cilium/cilium/pkg/hive"
 	"github.com/cilium/cilium/pkg/k8s/client"
 )
 
@@ -19,7 +20,7 @@ import (
 // controller, which contains the allocator.
 //
 // New requires access to a cache.Store associated with the service watcher.
-func New(ctx context.Context, clientset client.Clientset, indexer cache.Store) (*Manager, error) {
+func New(ctx context.Context, clientset client.Clientset, indexer cache.Store, shutdowner hive.Shutdowner) (*Manager, error) {
 	ctrl, err := newMetalLBController(ctx, clientset)
 	if err != nil {
 		return nil, err
@@ -30,6 +31,8 @@ func New(ctx context.Context, clientset client.Clientset, indexer cache.Store) (
 		queue: workqueue.New(),
 
 		indexer: indexer,
+
+		shutdowner: shutdowner,
 	}
 
 	go func() {
@@ -62,6 +65,8 @@ type Manager struct {
 	// by the watcher. This is used in order to handle delete events. See
 	// comment inside (*Manager).run().
 	indexer cache.Store
+
+	shutdowner hive.Shutdowner
 }
 
 func (m *Manager) MarkSynced() {
