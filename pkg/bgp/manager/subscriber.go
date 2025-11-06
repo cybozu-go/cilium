@@ -6,6 +6,7 @@
 package manager
 
 import (
+	"errors"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -18,6 +19,7 @@ import (
 	"github.com/cilium/cilium/pkg/k8s"
 	slim_corev1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/core/v1"
 	"github.com/cilium/cilium/pkg/logging/logfields"
+	"github.com/cilium/hive"
 )
 
 // OnAddService handles an add event for services. It implements
@@ -153,6 +155,9 @@ func (m *Manager) beforeRun() {
 		for _, k := range retryKeys {
 			l.WithField("service", k).Warn("over 60 retries, giving up reconciliation")
 		}
+		// This is a fatal error as the BGP manager must synchronize existing services before proceeding.
+		m.shutdowner.Shutdown(hive.ShutdownWithError(errors.New("failed to reconcile some services on BGP manager startup")))
+		return
 	}
 
 	l.Info("finished beforeRun")
