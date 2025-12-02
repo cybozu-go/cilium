@@ -33,6 +33,7 @@ import (
 	slim_meta "github.com/cilium/cilium/pkg/k8s/slim/k8s/apis/api/meta"
 	slim_meta_v1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/apis/meta/v1"
 	client_typed_v1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/client/clientset/versioned/typed/core/v1"
+	"github.com/cilium/cilium/pkg/logging/logfields"
 )
 
 const (
@@ -287,7 +288,17 @@ func (ipam *LBIPAM) poolOnUpsert(ctx context.Context, k resource.Key, pool *cili
 	pool = pool.DeepCopy()
 
 	var err error
-	if _, exists := ipam.pools[pool.GetName()]; exists {
+	if existingPool, exists := ipam.pools[pool.GetName()]; exists {
+		// Spec hasn't changed, nothing to do
+		if existingPool.Spec.DeepEqual(&pool.Spec) {
+			return nil
+		} else {
+			ipam.logger.Info("Updated Pool spec",
+				logfields.PoolName, pool.GetName(),
+				logfields.PoolOldSpec, existingPool.Spec,
+				logfields.PoolNewSpec, pool.Spec)
+		}
+
 		err = ipam.handlePoolModified(ctx, pool)
 		if err != nil {
 			return fmt.Errorf("handlePoolModified: %w", err)
@@ -648,6 +659,11 @@ func (ipam *LBIPAM) stripOrImportIngresses(sv *ServiceView) (statusModified bool
 				return statusModified, fmt.Errorf("findRangeOfIP: %w", err)
 			}
 			if lbRange == nil {
+				ipam.logger.Warn(
+					"Current IP does not belong to any matching range, deferring to regular allocation logic",
+					logfields.IPAddr, ip,
+					logfields.ServiceName, sv.Key,
+				)
 				continue
 			}
 
@@ -655,7 +671,12 @@ func (ipam *LBIPAM) stripOrImportIngresses(sv *ServiceView) (statusModified bool
 			err = lbRange.alloc.Alloc(ip, serviceViews)
 			if err != nil {
 				if errors.Is(err, ipalloc.ErrInUse) {
-					// The IP is already allocated, defer to regular allocation logic to deterime
+					ipam.logger.Warn(
+						"Current IP is already allocated by another service, deferring to regular allocation logic",
+						logfields.IPAddr, ingress.IP,
+						logfields.ServiceName, sv.Key,
+					)
+					// The IP is already allocated, defer to regular allocation logic to determine
 					// if this service can share the allocation.
 					ipam.logger.Warnf("stripping '%s' from '%s' as it is already in use and cannot be shared", ingress.IP, sv.Key.String())
 					continue
@@ -1540,13 +1561,19 @@ func (ipam *LBIPAM) revalidateAllServices(ctx context.Context) error {
 
 		return nil
 	}
-	for _, sv := range ipam.serviceStore.unsatisfied {
+
+	// We want to first revalidate all satisfied services.
+	// This helps in case when pool's CIDR was widened
+	// and we have unsatisfied services that match this pool.
+	// In this case, we want to revalidate satisfied services first,
+	// so that we can reallocate the same IPs from the newly widened CIDR.
+	for _, sv := range ipam.serviceStore.satisfied {
 		if err := revalidate(sv); err != nil {
 			return fmt.Errorf("revalidate: %w", err)
 		}
 	}
 
-	for _, sv := range ipam.serviceStore.satisfied {
+	for _, sv := range ipam.serviceStore.unsatisfied {
 		if err := revalidate(sv); err != nil {
 			return fmt.Errorf("revalidate: %w", err)
 		}
