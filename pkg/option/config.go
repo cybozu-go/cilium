@@ -943,6 +943,10 @@ const (
 	// PolicyAccountingArg argument enable policy accounting.
 	PolicyAccountingArg = "policy-accounting"
 
+	// ForceIdentityPolicyUpdates forces policy regeneration when identities are updated.
+	// When true, policy updates are forced even when revision check would skip them.
+	ForceIdentityPolicyUpdates = "force-identity-policy-updates"
+
 	// EnableHubble enables hubble in the agent.
 	EnableHubble = "enable-hubble"
 
@@ -2096,6 +2100,10 @@ type DaemonConfig struct {
 	// PolicyAccounting enable policy accounting
 	PolicyAccounting bool
 
+	// ForceIdentityPolicyUpdates forces policy regeneration when identities are updated.
+	// When true, policy updates are forced even when revision check would skip them.
+	ForceIdentityPolicyUpdates bool
+
 	// EnableHubble specifies whether to enable the hubble server.
 	EnableHubble bool
 
@@ -3133,6 +3141,7 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
 	c.CTMapEntriesTimeoutFIN = vp.GetDuration(CTMapEntriesTimeoutFINName)
 	c.PolicyAuditMode = vp.GetBool(PolicyAuditModeArg)
 	c.PolicyAccounting = vp.GetBool(PolicyAccountingArg)
+	c.ForceIdentityPolicyUpdates = vp.GetBool(ForceIdentityPolicyUpdates)
 	c.EnableIPv4FragmentsTracking = vp.GetBool(EnableIPv4FragmentsTrackingName)
 	c.FragmentsMapEntries = vp.GetInt(FragmentsMapEntriesName)
 	c.CRDWaitTimeout = vp.GetDuration(CRDWaitTimeout)

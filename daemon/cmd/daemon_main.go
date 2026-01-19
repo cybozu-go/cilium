@@ -887,6 +887,9 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 	flags.Bool(option.PolicyAccountingArg, true, "Enable policy accounting")
 	option.BindEnv(vp, option.PolicyAccountingArg)
 
+	flags.Bool(option.ForceIdentityPolicyUpdates, true, "Force policy regeneration when identities are updated")
+	option.BindEnv(vp, option.ForceIdentityPolicyUpdates)
+
 	flags.Bool(option.EnableHubble, false, "Enable hubble server")
 	option.BindEnv(vp, option.EnableHubble)
 

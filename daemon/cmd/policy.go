@@ -192,7 +192,7 @@ func (iao *identityAllocatorOwner) UpdateIdentities(added, deleted identity.Iden
 	iao.policy.GetSelectorCache().UpdateIdentities(added, deleted, wg)
 	// Wait for update propagation to endpoints before triggering policy updates
 	wg.Wait()
-	iao.policyUpdater.TriggerPolicyUpdates(false, "one or more identities created or deleted")
+	iao.policyUpdater.TriggerPolicyUpdates(option.Config.ForceIdentityPolicyUpdates, "one or more identities created or deleted")
 }
 
 // GetNodeSuffix returns the suffix to be appended to kvstore keys of this
