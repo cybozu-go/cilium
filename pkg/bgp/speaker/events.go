@@ -94,6 +94,19 @@ func (s *metallbspeaker) run(ctx context.Context) {
 			"component": "MetalLBSpeaker.run",
 		},
 	)
+
+	// Wait until the BPF datapath is fully initialized before processing
+	// any events. This prevents BGP route announcements from being made
+	// before the datapath is ready to forward traffic, which would cause
+	// "No route to host" errors for incoming connections.
+	l.Info("BGP speaker waiting for datapath initialization")
+	select {
+	case <-s.datapathReady:
+		l.Info("BGP speaker datapath ready, starting event processing")
+	case <-ctx.Done():
+		return
+	}
+
 	for {
 		// only check ctx here, we'll allow any in-flight
 		// events to be processed completely.

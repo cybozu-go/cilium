@@ -80,9 +80,11 @@ func TestSpeakerOnUpdateService(t *testing.T) {
 		queue:           workqueue.New(),
 		services:        make(map[k8s.ServiceID]*slim_corev1.Service),
 		endpointsGetter: mockEndGetter,
+		datapathReady:   make(chan struct{}),
 	}
 
 	go spkr.run(ctx)
+	spkr.NotifyDatapathReady()
 
 	err := spkr.OnUpdateService(&service)
 	if err != nil {
@@ -164,9 +166,11 @@ func TestSpeakerOnDeleteService(t *testing.T) {
 		services: map[k8s.ServiceID]*slim_corev1.Service{
 			serviceID: &service,
 		},
+		datapathReady: make(chan struct{}),
 	}
 
 	go spkr.run(ctx)
+	spkr.NotifyDatapathReady()
 
 	err := spkr.OnDeleteService(&service)
 	if err != nil {
@@ -250,9 +254,11 @@ func TestSpeakerOnUpdateEndpoints(t *testing.T) {
 		services: map[k8s.ServiceID]*slim_corev1.Service{
 			serviceID: &service,
 		},
+		datapathReady: make(chan struct{}),
 	}
 
 	go spkr.run(ctx)
+	spkr.NotifyDatapathReady()
 
 	err := spkr.OnUpdateEndpoints(&endpoints)
 	if err != nil {
@@ -366,9 +372,11 @@ func TestSpeakerOnUpdateNode(t *testing.T) {
 		announceLBIP:    true,
 		announcePodCIDR: true,
 		queue:           workqueue.New(),
+		datapathReady:   make(chan struct{}),
 	}
 
 	go spkr.run(ctx)
+	spkr.NotifyDatapathReady()
 
 	err := spkr.notifyNodeEvent(Update, &node, nodePodCIDRs(&node), false)
 	if err != nil {
@@ -470,9 +478,11 @@ func TestSpeakerOnDeleteNode(t *testing.T) {
 		announceLBIP:    true,
 		announcePodCIDR: true,
 		queue:           workqueue.New(),
+		datapathReady:   make(chan struct{}),
 	}
 
 	go spkr.run(ctx)
+	spkr.NotifyDatapathReady()
 
 	err := spkr.notifyNodeEvent(Delete, &node, nodePodCIDRs(&node), true)
 	if err != nil {
@@ -557,9 +567,11 @@ func TestSpeakerOnUpdateAndDeleteCiliumNode(t *testing.T) {
 		announceLBIP:    true,
 		announcePodCIDR: true,
 		queue:           workqueue.New(),
+		datapathReady:   make(chan struct{}),
 	}
 
 	go spkr.run(ctx)
+	spkr.NotifyDatapathReady()
 
 	// CiliumNode with one pod CIDR
 	node, advs := mock.GenTestCiliumNodeAndAdvertisements(1)

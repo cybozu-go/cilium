@@ -1880,6 +1880,20 @@ func startDaemon(d *Daemon, restoredEndpoints *endpointRestoreState, cleaner *da
 		}
 	}
 
+	// Signal the BGP speaker to begin advertising routes once the host
+	// datapath programs (bpf_host.c) have been attached to native devices.
+	// This must happen after AddHostEndpoint triggers endpoint regeneration
+	// and reloadHostDatapath completes; calling NotifyDatapathReady() earlier
+	// (e.g. after d.init()) would allow BGP announcements before the DNAT
+	// programs are in place, causing "No route to host" errors.
+	go func() {
+		select {
+		case <-d.datapath.Loader().HostDatapathInitialized():
+			params.MetalLBBgpSpeaker.NotifyDatapathReady()
+		case <-d.ctx.Done():
+		}
+	}()
+
 	if option.Config.EnableEnvoyConfig {
 		if !d.endpointManager.IngressEndpointExists() {
 			// Creating Ingress Endpoint depends on the Ingress IPs having been

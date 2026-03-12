@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 
 	"github.com/sirupsen/logrus"
@@ -42,6 +43,10 @@ type MetalLBBgpSpeaker interface {
 	OnUpdateService(svc *slim_corev1.Service) error
 	// OnDeleteService notifies the Speaker of a delete of a service.
 	OnDeleteService(svc *slim_corev1.Service) error
+	// NotifyDatapathReady signals that the BPF datapath has been fully
+	// initialized and BGP route announcements may begin. Calling this more
+	// than once is safe.
+	NotifyDatapathReady()
 }
 
 // newSpeaker creates a new MetalLB BGP speaker controller. Options are provided to
@@ -60,6 +65,7 @@ func newSpeaker(clientset client.Clientset, endpointsGetter endpointsGetter, opt
 		queue:           workqueue.New(),
 		services:        make(map[k8s.ServiceID]*slim_corev1.Service),
 		endpointsGetter: endpointsGetter,
+		datapathReady:   make(chan struct{}),
 	}
 
 	return spkr, nil
@@ -95,10 +101,26 @@ type metallbspeaker struct {
 	// ensuring no other events are processed after the
 	// final withdraw of routes.
 	shutdown atomic.Bool
+
+	// datapathReady is closed by NotifyDatapathReady once the BPF datapath
+	// has been fully initialized. The run() loop waits on this channel
+	// before processing any events, preventing BGP route announcements
+	// before the datapath is ready to forward traffic.
+	datapathReady     chan struct{}
+	datapathReadyOnce sync.Once
 }
 
 func (s *metallbspeaker) shutDown() bool {
 	return s.shutdown.Load()
+}
+
+// NotifyDatapathReady signals that the BPF datapath is initialized and BGP
+// announcements may begin. It is safe to call multiple times; only the first
+// call has effect.
+func (s *metallbspeaker) NotifyDatapathReady() {
+	s.datapathReadyOnce.Do(func() {
+		close(s.datapathReady)
+	})
 }
 
 func (s *metallbspeaker) OnUpdateService(svc *slim_corev1.Service) error {
@@ -407,3 +429,5 @@ func (n *noopSpeaker) OnUpdateEndpoints(eps *k8s.Endpoints) error {
 func (n *noopSpeaker) OnUpdateService(svc *slim_corev1.Service) error {
 	return nil
 }
+
+func (n *noopSpeaker) NotifyDatapathReady() {}
