@@ -18,6 +18,7 @@ import (
 	"github.com/cilium/cilium/pkg/bgpv1/agent/signaler"
 	"github.com/cilium/cilium/pkg/bgpv1/manager/store"
 	"github.com/cilium/cilium/pkg/bgpv1/types"
+	datapath "github.com/cilium/cilium/pkg/datapath/types"
 	"github.com/cilium/cilium/pkg/hive"
 	v2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	"github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2alpha1"
@@ -82,6 +83,10 @@ type Controller struct {
 
 	// current configuration state
 	ConfigMode *mode.ConfigMode
+
+	// Loader is used to wait for host datapath initialization before
+	// allowing BGP route announcements.
+	Loader datapath.Loader
 }
 
 // ControllerParams contains all parameters needed to construct a Controller
@@ -100,6 +105,7 @@ type ControllerParams struct {
 	BGPNodeConfigStore      store.BGPCPResourceStore[*v2.CiliumBGPNodeConfig]
 	DaemonConfig            *option.DaemonConfig
 	LocalCiliumNodeResource daemon_k8s.LocalCiliumNodeResource
+	Loader                  datapath.Loader
 }
 
 // NewController constructs a new BGP Control Plane Controller.
@@ -125,6 +131,7 @@ func NewController(params ControllerParams) (*Controller, error) {
 		PolicyResource:     params.PolicyResource,
 		BGPNodeConfigStore: params.BGPNodeConfigStore,
 		CiliumNodeResource: params.LocalCiliumNodeResource,
+		Loader:             params.Loader,
 	}
 
 	params.JobGroup.Add(
@@ -172,6 +179,19 @@ func (c *Controller) Run(ctx context.Context) {
 	scopedLog := c.Logger.With(types.ComponentLogField, "Controller.Run")
 
 	scopedLog.Info("Cilium BGP Control Plane Controller now running...")
+
+	// Wait for bpf_host.c to be attached to native devices before processing
+	// any BGP events. Without this gate, BGP may advertise routes before the
+	// DNAT programs are in place, causing a "No route to host" window.
+	scopedLog.Info("BGP Control Plane waiting for host datapath initialization")
+	select {
+	case <-c.Loader.HostDatapathInitialized():
+		scopedLog.Info("BGP Control Plane host datapath ready, starting event processing")
+	case <-ctx.Done():
+		return
+	}
+
+
 	ciliumNodeCh := c.CiliumNodeResource.Events(ctx)
 	for {
 		select {
