@@ -595,7 +595,13 @@ func (m *CachingIdentityAllocator) AllocateIdentity(ctx context.Context, lbls la
 	// Notify the owner of the newly added identities so that the
 	// cached identities can be updated ASAP, rather than just
 	// relying on the kv-store update events.
-	if allocated && notifyOwner {
+	// Also notify when isNewLocally (identity exists in cluster but is
+	// new to this node) to ensure the SelectorCache has this identity
+	// before the endpoint's policy is computed. Without this, there is
+	// a race where selectorPolicy is calculated before cachedSelections
+	// is updated, causing non-wildcard endpointSelector policies to not
+	// be applied.
+	if (allocated || isNewLocally) && notifyOwner {
 		added := identity.IdentityMap{
 			id.ID: id.LabelArray,
 		}
