@@ -1912,7 +1912,7 @@ func TestRangeDelete(t *testing.T) {
 // existing services, but will allow new services to be allocated from the new CIDRs.
 func TestPoolUpdate(t *testing.T) {
 	poolA := mkPool(poolAUID, "pool-a", []string{"10.0.10.0/24"})
-	fixture := mkTestFixture(true, true)
+	fixture := mkTestFixture(t, true, true)
 	poolA.Spec.ServiceSelector = &slim_meta_v1.LabelSelector{
 		MatchLabels: map[string]string{
 			"color": "blue",
@@ -2014,7 +2014,7 @@ func TestPoolUpdate(t *testing.T) {
 // new services to be allocated from the new range.
 func TestPoolExtendWithPendingServices(t *testing.T) {
 	poolA := mkPool(poolAUID, "pool-a", []string{"10.0.10.0/31"})
-	fixture := mkTestFixture(true, true)
+	fixture := mkTestFixture(t, true, true)
 	fixture.UpsertPool(t, poolA)
 	// This CIDR should allow for 2 IPs, so let's create 3 services and extend it.
 	createAndValidateService := func(name string, uid types.UID, validateAssigned bool) *slim_core_v1.Service {
