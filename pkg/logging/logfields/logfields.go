@@ -839,5 +839,14 @@ const (
 	// L7Parser is the L7 parser used for L7 network traffic
 	L7Parser = "l7parser"
 
+	// PoolName is the name of an IP pool
+	PoolName = "poolName"
+
+	// PoolOldSpec is the old spec of an IP pool
+	PoolOldSpec = "poolOldSpec"
+
+	// PoolNewSpec is the new spec of an IP pool
+	PoolNewSpec = "poolNewSpec"
+
 	ParentResource = "parentResource"
 )
