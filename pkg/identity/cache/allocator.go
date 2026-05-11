@@ -94,6 +94,11 @@ type CachingIdentityAllocator struct {
 	// operatorIDManagement indicates if cilium-operator is managing Cilium Identities.
 	operatorIDManagement bool
 
+	// notifyOnIsNewLocally controls whether owner is notified when an
+	// identity is new locally (exists globally but first seen on this node).
+	// See PR cybozu-go/cilium#5 for the race condition this prevents.
+	notifyOnIsNewLocally bool
+
 	// maxAllocAttempts is the number of attempted allocation requests
 	// performed before failing. This is mainly introduced for testing purposes.
 	maxAllocAttempts int
@@ -106,10 +111,11 @@ type CachingIdentityAllocator struct {
 }
 
 type AllocatorConfig struct {
-	EnableOperatorManageCIDs bool
-	Timeout                  time.Duration
-	SyncInterval             time.Duration
-	maxAllocAttempts         int
+	EnableOperatorManageCIDs         bool
+	EnableIdentityNotifyOnNewLocally bool
+	Timeout                          time.Duration
+	SyncInterval                     time.Duration
+	maxAllocAttempts                 int
 }
 
 // NewTestAllocatorConfig returns an AllocatorConfig initialized for testing purposes.
@@ -386,6 +392,7 @@ func NewCachingIdentityAllocator(logger *slog.Logger, owner IdentityAllocatorOwn
 		watcher:                            watcher,
 		events:                             make(allocator.AllocatorEventChan, eventsQueueSize),
 		operatorIDManagement:               config.EnableOperatorManageCIDs,
+		notifyOnIsNewLocally:               config.EnableIdentityNotifyOnNewLocally,
 		maxAllocAttempts:                   config.maxAllocAttempts,
 		timeout:                            config.Timeout,
 		syncInterval:                       config.SyncInterval,
@@ -600,8 +607,9 @@ func (m *CachingIdentityAllocator) AllocateIdentity(ctx context.Context, lbls la
 	// before the endpoint's policy is computed. Without this, there is
 	// a race where selectorPolicy is calculated before cachedSelections
 	// is updated, causing non-wildcard endpointSelector policies to not
-	// be applied.
-	if (allocated || isNewLocally) && notifyOwner {
+	// be applied. The isNewLocally notification is gated by
+	// notifyOnIsNewLocally so it can be rolled back if it causes regressions.
+	if (allocated || (isNewLocally && m.notifyOnIsNewLocally)) && notifyOwner {
 		added := identity.IdentityMap{
 			id.ID: id.LabelArray,
 		}
