@@ -81,21 +81,24 @@ type identityAllocatorOut struct {
 }
 
 type config struct {
-	IdentityManagementMode         string `mapstructure:"identity-management-mode"`
-	IdentityAllocationTimeout      time.Duration
-	IdentityAllocationSyncInterval time.Duration
+	IdentityManagementMode           string `mapstructure:"identity-management-mode"`
+	IdentityAllocationTimeout        time.Duration
+	IdentityAllocationSyncInterval   time.Duration
+	EnableIdentityNotifyOnNewLocally bool `mapstructure:"enable-identity-notify-on-new-locally"`
 }
 
 func (c config) Flags(flags *pflag.FlagSet) {
 	flags.String(option.IdentityManagementMode, c.IdentityManagementMode, "Configure whether Cilium Identities are managed by cilium-agent, cilium-operator, or both")
 	flags.Duration("identity-allocation-timeout", c.IdentityAllocationTimeout, "Timeout for identity allocation operations")
 	flags.Duration("identity-allocation-sync-interval", c.IdentityAllocationSyncInterval, "Periodic synchronization interval of the allocated identities")
+	flags.Bool("enable-identity-notify-on-new-locally", c.EnableIdentityNotifyOnNewLocally, "Notify identity owner (SelectorCache) when a globally-existing identity is first seen on this node, to avoid a race where endpoint policy is computed before the SelectorCache is updated")
 }
 
 var defaultConfig = config{
-	IdentityManagementMode:         option.IdentityManagementModeAgent,
-	IdentityAllocationTimeout:      2 * time.Minute,
-	IdentityAllocationSyncInterval: allocator.DefaultSyncInterval,
+	IdentityManagementMode:           option.IdentityManagementModeAgent,
+	IdentityAllocationTimeout:        2 * time.Minute,
+	IdentityAllocationSyncInterval:   allocator.DefaultSyncInterval,
+	EnableIdentityNotifyOnNewLocally: true,
 }
 
 func newIdentityAllocator(params identityAllocatorParams) identityAllocatorOut {
@@ -115,9 +118,10 @@ func newIdentityAllocator(params identityAllocatorParams) identityAllocatorOut {
 		)
 
 		allocatorConfig := cache.AllocatorConfig{
-			EnableOperatorManageCIDs: isOperatorManageCIDsEnabled,
-			Timeout:                  params.Config.IdentityAllocationTimeout,
-			SyncInterval:             params.Config.IdentityAllocationSyncInterval,
+			EnableOperatorManageCIDs:        isOperatorManageCIDsEnabled,
+			EnableIdentityNotifyOnNewLocally: params.Config.EnableIdentityNotifyOnNewLocally,
+			Timeout:                         params.Config.IdentityAllocationTimeout,
+			SyncInterval:                    params.Config.IdentityAllocationSyncInterval,
 		}
 
 		// Allocator: allocates local and cluster-wide security identities.
