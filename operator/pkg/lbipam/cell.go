@@ -33,12 +33,12 @@ var Cell = cell.Module(
 	metrics.Metric(newMetrics),
 	// Register configuration flags
 	cell.Config(lbipamConfig{
-		EnableLBIPAM: true,
+		EnableLBIPAM:             true,
+		MinimumLBIPPoolsRequired: 1,
 	}),
 	cell.Config(SharedConfig{
 		DefaultLBServiceIPAM: DefaultLBClassLBIPAM,
 	}),
-	cell.Config(lbipamConfig{MinimumLBIPPoolsRequired: 1}),
 )
 
 type lbipamConfig struct {
