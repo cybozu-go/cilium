@@ -22,6 +22,7 @@ import (
 	"github.com/cilium/cilium/pkg/hubble/build"
 	"github.com/cilium/cilium/pkg/hubble/container"
 	"github.com/cilium/cilium/pkg/hubble/filters"
+	"github.com/cilium/cilium/pkg/hubble/metrics"
 	"github.com/cilium/cilium/pkg/hubble/observer/observeroption"
 	observerTypes "github.com/cilium/cilium/pkg/hubble/observer/types"
 	"github.com/cilium/cilium/pkg/hubble/parser"
@@ -609,7 +610,9 @@ func (r *eventsReader) Next(ctx context.Context) (*v1.Event, error) {
 		// timestamps are supposed to be monotonic" as their timestamp
 		// corresponds to when a LostEvent was detected.
 		_, isLostEvent := e.Event.(*flowpb.LostEvent)
-		if !isLostEvent {
+		if isLostEvent {
+			metrics.LostEvents.WithLabelValues(strings.ToLower(flowpb.LostEventSource_HUBBLE_RING_BUFFER.String())).Inc()
+		} else {
 			if r.timeRange {
 				if err := e.Timestamp.CheckValid(); err != nil {
 					return nil, err
