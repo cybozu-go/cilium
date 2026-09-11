@@ -81,10 +81,11 @@ type identityAllocatorOut struct {
 }
 
 type config struct {
-	IdentityManagementMode           string `mapstructure:"identity-management-mode"`
-	IdentityAllocationTimeout        time.Duration
-	IdentityAllocationSyncInterval   time.Duration
-	EnableIdentityNotifyOnNewLocally bool `mapstructure:"enable-identity-notify-on-new-locally"`
+	IdentityManagementMode              string `mapstructure:"identity-management-mode"`
+	IdentityAllocationTimeout           time.Duration
+	IdentityAllocationSyncInterval      time.Duration
+	EnableIdentityNotifyOnNewLocally    bool `mapstructure:"enable-identity-notify-on-new-locally"`
+	EnableIdentityNotifyUnconditionally bool `mapstructure:"enable-identity-notify-unconditionally"`
 }
 
 func (c config) Flags(flags *pflag.FlagSet) {
@@ -92,13 +93,15 @@ func (c config) Flags(flags *pflag.FlagSet) {
 	flags.Duration("identity-allocation-timeout", c.IdentityAllocationTimeout, "Timeout for identity allocation operations")
 	flags.Duration("identity-allocation-sync-interval", c.IdentityAllocationSyncInterval, "Periodic synchronization interval of the allocated identities")
 	flags.Bool("enable-identity-notify-on-new-locally", c.EnableIdentityNotifyOnNewLocally, "Notify identity owner (SelectorCache) when a globally-existing identity is first seen on this node, to avoid a race where endpoint policy is computed before the SelectorCache is updated")
+	flags.Bool("enable-identity-notify-unconditionally", c.EnableIdentityNotifyUnconditionally, "Notify identity owner (SelectorCache) on every identity allocation, not only when newly allocated or new locally. Closes a race where two endpoints on the same node concurrently request the same never-before-seen identity; the loser of that race is not covered by enable-identity-notify-on-new-locally. Takes precedence over enable-identity-notify-on-new-locally when enabled.")
 }
 
 var defaultConfig = config{
-	IdentityManagementMode:           option.IdentityManagementModeAgent,
-	IdentityAllocationTimeout:        2 * time.Minute,
-	IdentityAllocationSyncInterval:   allocator.DefaultSyncInterval,
-	EnableIdentityNotifyOnNewLocally: true,
+	IdentityManagementMode:              option.IdentityManagementModeAgent,
+	IdentityAllocationTimeout:           2 * time.Minute,
+	IdentityAllocationSyncInterval:      allocator.DefaultSyncInterval,
+	EnableIdentityNotifyOnNewLocally:    true,
+	EnableIdentityNotifyUnconditionally: true,
 }
 
 func newIdentityAllocator(params identityAllocatorParams) identityAllocatorOut {
@@ -118,10 +121,11 @@ func newIdentityAllocator(params identityAllocatorParams) identityAllocatorOut {
 		)
 
 		allocatorConfig := cache.AllocatorConfig{
-			EnableOperatorManageCIDs:        isOperatorManageCIDsEnabled,
-			EnableIdentityNotifyOnNewLocally: params.Config.EnableIdentityNotifyOnNewLocally,
-			Timeout:                         params.Config.IdentityAllocationTimeout,
-			SyncInterval:                    params.Config.IdentityAllocationSyncInterval,
+			EnableOperatorManageCIDs:            isOperatorManageCIDsEnabled,
+			EnableIdentityNotifyOnNewLocally:    params.Config.EnableIdentityNotifyOnNewLocally,
+			EnableIdentityNotifyUnconditionally: params.Config.EnableIdentityNotifyUnconditionally,
+			Timeout:                             params.Config.IdentityAllocationTimeout,
+			SyncInterval:                        params.Config.IdentityAllocationSyncInterval,
 		}
 
 		// Allocator: allocates local and cluster-wide security identities.

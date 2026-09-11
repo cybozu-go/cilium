@@ -97,7 +97,21 @@ type CachingIdentityAllocator struct {
 	// notifyOnIsNewLocally controls whether owner is notified when an
 	// identity is new locally (exists globally but first seen on this node).
 	// See PR cybozu-go/cilium#5 for the race condition this prevents.
+	// Superseded by notifyUnconditionally when that is enabled; only takes
+	// effect on its own when notifyUnconditionally is disabled.
 	notifyOnIsNewLocally bool
+
+	// notifyUnconditionally controls whether owner is notified on every
+	// AllocateIdentity call, regardless of whether this call newly
+	// allocated the identity or found it new locally. This closes a
+	// narrower race that notifyOnIsNewLocally does not cover: two
+	// endpoints on the same node concurrently requesting the same
+	// never-before-seen identity. The loser of that race has both
+	// allocated=false and isNewLocally=false (the winner already
+	// registered the key in the node-local allocator cache before the
+	// loser checks it), so it would otherwise skip notification even
+	// though the SelectorCache may not yet reflect the identity.
+	notifyUnconditionally bool
 
 	// maxAllocAttempts is the number of attempted allocation requests
 	// performed before failing. This is mainly introduced for testing purposes.
@@ -111,11 +125,12 @@ type CachingIdentityAllocator struct {
 }
 
 type AllocatorConfig struct {
-	EnableOperatorManageCIDs         bool
-	EnableIdentityNotifyOnNewLocally bool
-	Timeout                          time.Duration
-	SyncInterval                     time.Duration
-	maxAllocAttempts                 int
+	EnableOperatorManageCIDs            bool
+	EnableIdentityNotifyOnNewLocally    bool
+	EnableIdentityNotifyUnconditionally bool
+	Timeout                             time.Duration
+	SyncInterval                        time.Duration
+	maxAllocAttempts                    int
 }
 
 // NewTestAllocatorConfig returns an AllocatorConfig initialized for testing purposes.
@@ -393,6 +408,7 @@ func NewCachingIdentityAllocator(logger *slog.Logger, owner IdentityAllocatorOwn
 		events:                             make(allocator.AllocatorEventChan, eventsQueueSize),
 		operatorIDManagement:               config.EnableOperatorManageCIDs,
 		notifyOnIsNewLocally:               config.EnableIdentityNotifyOnNewLocally,
+		notifyUnconditionally:              config.EnableIdentityNotifyUnconditionally,
 		maxAllocAttempts:                   config.maxAllocAttempts,
 		timeout:                            config.Timeout,
 		syncInterval:                       config.SyncInterval,
@@ -609,7 +625,20 @@ func (m *CachingIdentityAllocator) AllocateIdentity(ctx context.Context, lbls la
 	// is updated, causing non-wildcard endpointSelector policies to not
 	// be applied. The isNewLocally notification is gated by
 	// notifyOnIsNewLocally so it can be rolled back if it causes regressions.
-	if (allocated || (isNewLocally && m.notifyOnIsNewLocally)) && notifyOwner {
+	//
+	// notifyOnIsNewLocally does not cover the case where two endpoints on
+	// the same node concurrently request the same never-before-seen
+	// identity: the loser of that race observes both allocated=false and
+	// isNewLocally=false, because the winner already registered the key
+	// in the node-local allocator cache (see pkg/allocator/localkeys.go)
+	// before the loser checks it, even though the winner's SelectorCache
+	// sync may still be in flight. notifyUnconditionally closes this gap
+	// by notifying on every call; the redundant calls this produces are
+	// cheap no-ops via SelectorCache.CanSkipUpdate, and concurrent
+	// callers correctly block on SelectorCache's internal mutex rather
+	// than racing. When notifyUnconditionally is disabled, behavior falls
+	// back to the notifyOnIsNewLocally-gated logic above.
+	if (m.notifyUnconditionally || allocated || (isNewLocally && m.notifyOnIsNewLocally)) && notifyOwner {
 		added := identity.IdentityMap{
 			id.ID: id.LabelArray,
 		}
