@@ -93,19 +93,22 @@ type identityAllocatorOut struct {
 }
 
 type config struct {
-	EnableOperatorManageCIDs         bool `mapstructure:"operator-manages-identities"`
-	EnableIdentityNotifyOnNewLocally bool `mapstructure:"enable-identity-notify-on-new-locally"`
+	EnableOperatorManageCIDs            bool `mapstructure:"operator-manages-identities"`
+	EnableIdentityNotifyOnNewLocally    bool `mapstructure:"enable-identity-notify-on-new-locally"`
+	EnableIdentityNotifyUnconditionally bool `mapstructure:"enable-identity-notify-unconditionally"`
 }
 
 func (c config) Flags(flags *pflag.FlagSet) {
 	flags.Bool("operator-manages-identities", c.EnableOperatorManageCIDs, "Enables operator to manage Cilium Identities by running a Cilium Identity controller")
 	flags.MarkHidden("operator-manages-identities") // See https://github.com/cilium/cilium/issues/34675
 	flags.Bool("enable-identity-notify-on-new-locally", c.EnableIdentityNotifyOnNewLocally, "Notify identity owner (SelectorCache) when a globally-existing identity is first seen on this node, to avoid a race where endpoint policy is computed before the SelectorCache is updated")
+	flags.Bool("enable-identity-notify-unconditionally", c.EnableIdentityNotifyUnconditionally, "Notify identity owner (SelectorCache) on every identity allocation, not only when newly allocated or new locally. Closes a race where two endpoints on the same node concurrently request the same never-before-seen identity; the loser of that race is not covered by enable-identity-notify-on-new-locally. Takes precedence over enable-identity-notify-on-new-locally when enabled.")
 }
 
 var defaultConfig = config{
-	EnableOperatorManageCIDs:         false,
-	EnableIdentityNotifyOnNewLocally: true,
+	EnableOperatorManageCIDs:            false,
+	EnableIdentityNotifyOnNewLocally:    true,
+	EnableIdentityNotifyUnconditionally: true,
 }
 
 func newIdentityAllocator(params identityAllocatorParams) identityAllocatorOut {
@@ -122,8 +125,9 @@ func newIdentityAllocator(params identityAllocatorParams) identityAllocatorOut {
 
 	if option.NetworkPolicyEnabled(option.Config) {
 		allocatorConfig := cache.AllocatorConfig{
-			EnableOperatorManageCIDs:         params.Config.EnableOperatorManageCIDs,
-			EnableIdentityNotifyOnNewLocally: params.Config.EnableIdentityNotifyOnNewLocally,
+			EnableOperatorManageCIDs:            params.Config.EnableOperatorManageCIDs,
+			EnableIdentityNotifyOnNewLocally:    params.Config.EnableIdentityNotifyOnNewLocally,
+			EnableIdentityNotifyUnconditionally: params.Config.EnableIdentityNotifyUnconditionally,
 		}
 
 		// Allocator: allocates local and cluster-wide security identities.
