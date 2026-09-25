@@ -2748,6 +2748,36 @@ skip_service_lookup:
 								 has_l4_header, l4_off,
 								 key.address, key.dport,
 								 ext_err);
+
+#if defined(ENABLE_DSR) && !defined(ENABLE_DSR_HYBRID)
+			if (!*dsr) {
+				/* nodeport_extract_dsr_v4() above only recognizes an
+				 * established DSR connection via ct_has_dsr_egress_entry4(),
+				 * which checks the write-once dsr_internal CT bit. That bit
+				 * is never set for a connection that was originally
+				 * delivered natively (backend_local branch of
+				 * nodeport_svc_lb4()) and later starts arriving over the
+				 * overlay because of an ECMP next-hop change: the CT entry
+				 * still correctly reflects that this is a NodePort/Service
+				 * connection (node_port is set instead), it's just not the
+				 * DSR-ingress flavor of it.
+				 *
+				 * In a pure-DSR build (no hybrid/SNAT NodePort dispatch
+				 * exists at all) any NodePort-tracked connection -
+				 * regardless of whether node_port or dsr_internal ended up
+				 * being recorded - is necessarily DSR, so widen the check
+				 * to also accept node_port. This only feeds into identity
+				 * resolution (bpf_overlay.c); it must not influence the
+				 * nodeport_dsr_ingress_ipv4() dispatch decision above,
+				 * which is why this is checked strictly after it.
+				 */
+				struct ipv4_ct_tuple tmp = tuple;
+
+				ipv4_ct_tuple_reverse(&tmp);
+				*dsr = ct_has_nodeport_egress_entry4(get_ct_map4(&tmp), &tmp,
+								     NULL, false);
+			}
+#endif
 		}
 #endif
 #endif /* ENABLE_DSR */
