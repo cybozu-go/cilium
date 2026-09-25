@@ -2748,6 +2748,46 @@ skip_service_lookup:
 								 has_l4_header, l4_off,
 								 key.address, key.dport,
 								 ext_err);
+
+#ifdef ENABLE_DSR
+			if (!*dsr) {
+				/* nodeport_extract_dsr_v4() above only recognizes an
+				 * established DSR connection via the write-once
+				 * dsr_internal CT bit, which is never set for a
+				 * connection that was originally delivered natively
+				 * (backend_local branch of nodeport_svc_lb4()) and later
+				 * starts arriving over the overlay because of an ECMP
+				 * next-hop change - and which, unlike node_port, cannot
+				 * be trusted at all once a Service's forwarding mode can
+				 * differ per Service (hybrid/SNAT dispatch).
+				 *
+				 * Instead of trusting that frozen CT bit, re-derive the
+				 * answer from a live, authoritative source: look up the
+				 * VIP this connection maps back to via its RevNAT state
+				 * (rev_nat_index for a natively-delivered connection, or
+				 * the DSR SNAT mapping otherwise), then re-query the
+				 * Service table for its *current* forwarding mode. This
+				 * works for both pure-DSR and hybrid/per-Service dispatch,
+				 * and doesn't depend on which code path happened to
+				 * create the CT entry at connection-start time.
+				 */
+				struct ipv4_ct_tuple tmp = tuple;
+				struct lb4_reverse_nat *nat_info;
+
+				ipv4_ct_tuple_reverse(&tmp);
+				nat_info = nodeport_rev_dnat_get_info_ipv4(ctx, &tmp);
+				if (nat_info) {
+					struct lb4_key svc_key = {
+						.address = nat_info->address,
+						.dport   = nat_info->port,
+					};
+					struct lb4_service *dsr_svc = lb4_lookup_service(&svc_key, false);
+
+					if (dsr_svc)
+						*dsr = nodeport_uses_dsr4(dsr_svc, &tuple);
+				}
+			}
+#endif /* ENABLE_DSR */
 		}
 #endif
 #endif /* ENABLE_DSR */
