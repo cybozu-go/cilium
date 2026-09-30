@@ -2748,6 +2748,28 @@ skip_service_lookup:
 								 has_l4_header, l4_off,
 								 key.address, key.dport,
 								 ext_err);
+
+			if (!*dsr) {
+				/* dsr_internal is never set for a connection that was
+				 * originally delivered natively and later starts
+				 * arriving over the overlay due to an ECMP change.
+				 * Re-derive via the connection's RevNAT state instead
+				 * of trusting that stale bit.
+				 */
+				struct ipv4_ct_tuple tmp = tuple;
+				struct lb4_reverse_nat *nat_info;
+
+				ipv4_ct_tuple_reverse(&tmp);
+				nat_info = nodeport_rev_dnat_get_info_ipv4(ctx, &tmp);
+				if (nat_info) {
+					*dsr = true;
+					return nodeport_dsr_ingress_ipv4(ctx, &tuple, ip4,
+									 has_l4_header, l4_off,
+									 nat_info->address,
+									 nat_info->port,
+									 ext_err);
+				}
+			}
 		}
 #endif
 #endif /* ENABLE_DSR */
