@@ -1739,6 +1739,9 @@ static __always_inline int encap_geneve_dsr_opt4(struct __ctx_buff *ctx, int l3_
 }
 #endif /* DSR_ENCAP_MODE */
 
+static __always_inline struct lb4_reverse_nat *
+nodeport_rev_dnat_get_info_ipv4(struct __ctx_buff *ctx, struct ipv4_ct_tuple *tuple);
+
 static __always_inline int
 nodeport_extract_dsr_v4(struct __ctx_buff *ctx,
 			const struct iphdr *ip4 __maybe_unused,
@@ -1769,6 +1772,23 @@ nodeport_extract_dsr_v4(struct __ctx_buff *ctx,
 			 */
 			*dsr = ct_has_dsr_egress_entry4(get_ct_map4(&tmp), &tmp);
 			*port = 0;
+
+			if (!*dsr) {
+				/* dsr_internal is never set for a connection that was
+				 * originally delivered natively and later starts
+				 * arriving over the overlay due to an ECMP change.
+				 * Re-derive via the connection's RevNAT state instead
+				 * of trusting that stale bit.
+				 */
+				struct lb4_reverse_nat *nat_info;
+
+				nat_info = nodeport_rev_dnat_get_info_ipv4(ctx, &tmp);
+				if (nat_info) {
+					*dsr = true;
+					*addr = nat_info->address;
+					*port = nat_info->port;
+				}
+			}
 			return 0;
 		}
 	}
