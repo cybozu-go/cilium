@@ -517,6 +517,18 @@ func GC(m *Map, filter GCFilter, next4, next6 func(GCEvent)) (int, error) {
 	return doGC(m, filter, next4, next6, false)
 }
 
+// GCWithClockSource runs GC with given clock source.
+func GCWithClockSource(m *Map, filter GCFilter, cs *models.ClockSource, next4, next6 func(GCEvent)) (int, error) {
+	if filter.RemoveExpired {
+		t, err := timestamp.GetCTCurTime(cs)
+		if err != nil {
+			return 0, err
+		}
+		filter.Time = uint32(t)
+	}
+	return doGC(m, filter, next4, next6, false)
+}
+
 // PurgeOrphanNATEntries removes orphan SNAT entries. We call an SNAT entry
 // orphan if it does not have a corresponding CT entry.
 //
